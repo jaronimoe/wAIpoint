@@ -1,0 +1,11 @@
+{
+  "name": "Cache the app shell in a service worker",
+  "status": "done",
+  "commits": [
+    "https://github.com/example_owner/recipe-box/commit/3f9a1c2",
+    "https://github.com/example_owner/recipe-box/commit/b71e0d4"
+  ],
+  "notes": "Precaches the shell only; recipe images are cached on first view, not up front.",
+  "created": "2026-07-01T08:31:00Z",
+  "updated": "2026-07-14T11:20:00Z"
+}

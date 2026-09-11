@@ -1,0 +1,9 @@
+{
+  "name": "Detect a copied recipe link on focus",
+  "status": "dropped",
+  "commits": [],
+  "notes": "Browsers only allow clipboard reads inside a user gesture. Replaced by the share target.",
+  "created": "2026-07-20T10:02:00Z",
+  "updated": "2026-07-20T10:02:00Z",
+  "edited": "2026-09-08T09:43:00Z"
+}

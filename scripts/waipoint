@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/waipoint/config"
+TRACKER_REPO=""
+MARKER_FILE="waipoint-data.json"
+
+usage() {
+  cat <<'EOF'
+Usage: waipoint <command> [options]
+
+Project commands:
+  init-project <slug>                 Create a new project
+    --name <name>                     Human-readable name (default: slug)
+    --repo <owner/repo>               GitHub repo (repeatable)
+    --description <desc>              Project description
+    --tags <t1,t2,...>                Comma-separated tags
+
+  update-project <slug>               Update project metadata
+    --status <status>                 active|paused|completed|archived
+    --description <desc>              Update description
+
+Work package commands:
+  init-wp <project> <wp-slug>         Create a work package
+    --name <name>                     Human-readable name (default: slug)
+    --description <desc>              Description
+    --priority <low|medium|high>      Priority level
+
+  update-wp <project> <wp-slug>       Update work package
+    --status <status>                 planned|in-progress|blocked|done
+    --priority <low|medium|high>      Priority level
+
+Task commands:
+  add-task <project> <wp> <task-slug> Add a task
+    --name <name>                     Task name (default: slug)
+
+  update-task <project> <wp> <task>   Update a task
+    --status <status>                 open|current|done|dropped
+    --commit <url>                    Append a commit URL
+    --notes <text>                    Set notes
+
+Read commands:
+  list                                List all projects
+  show <project>                      Show project with work packages and tasks
+  dashboard [file]                    Generate HTML dashboard (default: dashboard.html)
+    --open                            Open in browser after generating
+    --force                           Rebuild even if no changes detected
+
+Configuration:
+  The tracker repo (owner/name) comes from WAIPOINT_REPO, or else from a
+  repo= line in ~/.config/waipoint/config. There is no default.
+EOF
+  exit 1
+}
+
+now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+# No default on purpose: a default that names the wrong repo does not fail, it
+# reads and writes somewhere else.
+resolve_tracker_repo() {
+  TRACKER_REPO="${WAIPOINT_REPO:-}"
+  if [ -z "$TRACKER_REPO" ] && [ -f "$CONFIG_FILE" ]; then
+    TRACKER_REPO=$(sed -n 's/^[[:space:]]*repo[[:space:]]*=[[:space:]]*//p' "$CONFIG_FILE" | tail -n 1 | tr -d '[:space:]')
+  fi
+  if [ -z "$TRACKER_REPO" ]; then
+    echo "Error: no tracker repo configured. Set one with either:"
+    echo "  mkdir -p \"$(dirname "$CONFIG_FILE")\" && echo 'repo=<owner>/<data-repo>' > \"${CONFIG_FILE}\""
+    echo "  export WAIPOINT_REPO=<owner>/<data-repo>"
+    exit 1
+  fi
+  if ! [[ "$TRACKER_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo "Error: tracker repo '${TRACKER_REPO}' is not in owner/name form"
+    exit 1
+  fi
+}
+
+gh_get_file() {
+  local out
+  out=$(gh api "repos/${TRACKER_REPO}/contents/${1}" --jq '.content' 2>/dev/null) || { echo ""; return; }
+  printf '%s' "$out" | base64 -d 2>/dev/null
+}
+
+gh_get_sha() {
+  local out
+  out=$(gh api "repos/${TRACKER_REPO}/contents/${1}" --jq '.sha' 2>/dev/null) || { echo ""; return; }
+  printf '%s\n' "$out"
+}
+
+# Blob sha on the first line, base64 content after it -- from ONE read. Two
+# separate reads can pair a newer sha with older content, and the PUT would
+# then overwrite whatever was written in between.
+gh_get_sha_and_file() {
+  local out
+  out=$(gh api "repos/${TRACKER_REPO}/contents/${1}" --jq '.sha + "\n" + .content' 2>/dev/null) || { echo ""; return; }
+  printf '%s\n' "$out"
+}
+
+# Every write goes through gh_put_file, so this is the one place that stops a
+# write to a repo that is not a wAIpoint data repo. A repo name can be valid
+# and still wrong -- a typo, or an old name now owned by another repo -- and a
+# PUT without a sha would quietly create files there.
+require_data_repo() {
+  local err
+  if err=$(gh api "repos/${TRACKER_REPO}/contents/${MARKER_FILE}" --silent 2>&1); then
+    return
+  fi
+  if [[ "$err" == *"HTTP 404"* ]]; then
+    echo "Error: ${TRACKER_REPO} has no ${MARKER_FILE} at its root (or your gh login cannot read it), so it is not a wAIpoint data repo. Nothing was written."
+    echo "Check WAIPOINT_REPO or ${CONFIG_FILE}."
+  else
+    echo "Error: could not check ${TRACKER_REPO} for ${MARKER_FILE}. Nothing was written."
+    echo "$err"
+  fi
+  exit 1
+}
+
+gh_put_file() {
+  local path="$1" content="$2" message="$3" sha="${4:-}"
+  require_data_repo
+  local encoded
+  encoded=$(printf '%s' "$content" | base64)
+  local body
+  if [ -n "$sha" ]; then
+    body=$(jq -n --arg msg "$message" --arg c "$encoded" --arg sha "$sha" \
+      '{message:$msg, content:$c, sha:$sha}')
+  else
+    body=$(jq -n --arg msg "$message" --arg c "$encoded" \
+      '{message:$msg, content:$c}')
+  fi
+  gh api "repos/${TRACKER_REPO}/contents/${path}" --method PUT --input - <<< "$body" > /dev/null
+}
+
+gh_update_json() {
+  local path="$1" message="$2"
+  shift 2
+  local raw current sha updated
+  raw=$(gh_get_sha_and_file "$path")
+  [ -z "$raw" ] && { echo "Error: ${path} not found"; exit 1; }
+  sha=${raw%%$'\n'*}
+  current=$(printf '%s' "${raw#*$'\n'}" | base64 -d)
+  updated="$current"
+  updated=$(echo "$updated" | jq --arg ts "$(now_iso)" '.updated = $ts')
+  while [[ $# -gt 0 ]]; do
+    local field="$1" value="$2"; shift 2
+    if [[ "$value" == '['* ]]; then
+      updated=$(echo "$updated" | jq --argjson v "$value" ".${field} = \$v")
+    else
+      updated=$(echo "$updated" | jq --arg v "$value" ".${field} = \$v")
+    fi
+  done
+  gh_put_file "$path" "$updated" "$message" "$sha"
+}
+
+cmd_init_project() {
+  local slug="${1:-}"; shift || true
+  [ -z "$slug" ] && { echo "Error: project slug required"; usage; }
+  local name="$slug" repos="[]" description="" tags="[]"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) name="$2"; shift 2 ;;
+      --repo) repos=$(echo "$repos" | jq --arg r "$2" '. + [$r]'); shift 2 ;;
+      --description) description="$2"; shift 2 ;;
+      --tags) tags=$(echo "$2" | tr ',' '\n' | jq -R . | jq -s .); shift 2 ;;
+      *) echo "Unknown option: $1"; usage ;;
+    esac
+  done
+  local now; now=$(now_iso)
+  local state
+  state=$(jq -n \
+    --arg name "$name" --argjson repos "$repos" --arg status "active" \
+    --arg description "$description" --argjson tags "$tags" \
+    --arg created "$now" --arg updated "$now" \
+    '{name:$name, repos:$repos, status:$status, description:$description, tags:$tags, created:$created, updated:$updated}')
+  gh_put_file "projects/${slug}/project.json" "$state" "init project: ${slug}"
+  echo "Created project: ${slug}"
+}
+
+cmd_update_project() {
+  local slug="${1:-}"; shift || true
+  [ -z "$slug" ] && { echo "Error: project slug required"; usage; }
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --status) args+=(status "$2"); shift 2 ;;
+      --description) args+=(description "$2"); shift 2 ;;
+      *) echo "Unknown option: $1"; usage ;;
+    esac
+  done
+  gh_update_json "projects/${slug}/project.json" "update project: ${slug}" "${args[@]}"
+  echo "Updated project: ${slug}"
+}
+
+cmd_init_wp() {
+  local project="${1:-}" wp="${2:-}"; shift 2 || true
+  [ -z "$project" ] || [ -z "$wp" ] && { echo "Error: project and wp slug required"; usage; }
+  local name="$wp" description="" priority="medium"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) name="$2"; shift 2 ;;
+      --description) description="$2"; shift 2 ;;
+      --priority) priority="$2"; shift 2 ;;
+      *) echo "Unknown option: $1"; usage ;;
+    esac
+  done
+  local now; now=$(now_iso)
+  local state
+  state=$(jq -n \
+    --arg name "$name" --arg description "$description" --arg status "planned" \
+    --arg priority "$priority" --arg created "$now" --arg updated "$now" \
+    '{name:$name, description:$description, status:$status, priority:$priority, created:$created, updated:$updated}')
+  gh_put_file "projects/${project}/${wp}/workpackage.json" "$state" "init wp: ${project}/${wp}"
+  echo "Created work package: ${project}/${wp}"
+}
+
+cmd_update_wp() {
+  local project="${1:-}" wp="${2:-}"; shift 2 || true
+  [ -z "$project" ] || [ -z "$wp" ] && { echo "Error: project and wp slug required"; usage; }
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --status) args+=(status "$2"); shift 2 ;;
+      --priority) args+=(priority "$2"); shift 2 ;;
+      --description) args+=(description "$2"); shift 2 ;;
+      *) echo "Unknown option: $1"; usage ;;
+    esac
+  done
+  gh_update_json "projects/${project}/${wp}/workpackage.json" "update wp: ${project}/${wp}" "${args[@]}"
+  echo "Updated work package: ${project}/${wp}"
+}
+
+cmd_add_task() {
+  local project="${1:-}" wp="${2:-}" task="${3:-}"; shift 3 || true
+  [ -z "$project" ] || [ -z "$wp" ] || [ -z "$task" ] && { echo "Error: project, wp, and task slug required"; usage; }
+  local name="$task"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) name="$2"; shift 2 ;;
+      *) echo "Unknown option: $1"; usage ;;
+    esac
+  done
+  local path="projects/${project}/${wp}/tasks/${task}.json"
+  local existing
+  existing=$(gh_get_sha "$path")
+  [ -n "$existing" ] && { echo "Error: task '${task}' already exists in ${project}/${wp}"; exit 1; }
+  local now; now=$(now_iso)
+  local state
+  state=$(jq -n \
+    --arg name "$name" --arg status "open" --arg created "$now" --arg updated "$now" \
+    '{name:$name, status:$status, commits:[], notes:"", created:$created, updated:$updated}')
+  gh_put_file "$path" "$state" "add task: ${project}/${wp}/${task}"
+  echo "Created task: ${project}/${wp}/${task}"
+}
+
+cmd_update_task() {
+  local project="${1:-}" wp="${2:-}" task="${3:-}"; shift 3 || true
+  [ -z "$project" ] || [ -z "$wp" ] || [ -z "$task" ] && { echo "Error: project, wp, and task slug required"; usage; }
+  local path="projects/${project}/${wp}/tasks/${task}.json"
+  local raw current sha
+  raw=$(gh_get_sha_and_file "$path")
+  [ -z "$raw" ] && { echo "Error: task not found"; exit 1; }
+  sha=${raw%%$'\n'*}
+  current=$(printf '%s' "${raw#*$'\n'}" | base64 -d)
+  local updated="$current"
+  updated=$(echo "$updated" | jq --arg ts "$(now_iso)" '.updated = $ts')
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --status) updated=$(echo "$updated" | jq --arg v "$2" '.status = $v'); shift 2 ;;
+      --commit) updated=$(echo "$updated" | jq --arg v "$2" '.commits += [$v]'); shift 2 ;;
+      --notes) updated=$(echo "$updated" | jq --arg v "$2" '.notes = $v'); shift 2 ;;
+      *) echo "Unknown option: $1"; usage ;;
+    esac
+  done
+  gh_put_file "$path" "$updated" "update task: ${task}" "$sha"
+  echo "Updated task: ${project}/${wp}/${task}"
+}
+
+cmd_list() {
+  local projects
+  projects=$(gh api "repos/${TRACKER_REPO}/contents/projects" --jq '.[].name' 2>/dev/null || echo "")
+  [ -z "$projects" ] && { echo "No projects tracked."; return; }
+  while IFS= read -r slug; do
+    [ "$slug" = ".gitkeep" ] && continue
+    local state
+    state=$(gh_get_file "projects/${slug}/project.json" 2>/dev/null)
+    if [ -n "$state" ]; then
+      local name status
+      name=$(echo "$state" | jq -r '.name')
+      status=$(echo "$state" | jq -r '.status')
+      printf "  %-25s [%s]\n" "$name" "$status"
+    fi
+  done <<< "$projects"
+}
+
+cmd_show() {
+  local slug="${1:-}"
+  [ -z "$slug" ] && { echo "Error: project slug required"; usage; }
+  local state
+  state=$(gh_get_file "projects/${slug}/project.json")
+  [ -z "$state" ] && { echo "Error: project '${slug}' not found"; exit 1; }
+  echo "=== $(echo "$state" | jq -r '.name') ==="
+  echo "$state" | jq '{status, description, repos, tags, updated}'
+  local dirs
+  dirs=$(gh api "repos/${TRACKER_REPO}/contents/projects/${slug}" --jq '.[].name' 2>/dev/null || echo "")
+  while IFS= read -r item; do
+    [ "$item" = "project.json" ] && continue
+    local wp
+    wp=$(gh_get_file "projects/${slug}/${item}/workpackage.json" 2>/dev/null)
+    [ -z "$wp" ] && continue
+    local wp_name wp_status wp_priority
+    wp_name=$(echo "$wp" | jq -r '.name')
+    wp_status=$(echo "$wp" | jq -r '.status')
+    wp_priority=$(echo "$wp" | jq -r '.priority // ""')
+    printf "\n  [%s] %s (%s)\n" "$wp_status" "$wp_name" "$wp_priority"
+    local tasks
+    tasks=$(gh api "repos/${TRACKER_REPO}/contents/projects/${slug}/${item}/tasks" --jq '.[].name' 2>/dev/null || echo "")
+    [ -z "$tasks" ] && continue
+    while IFS= read -r tfile; do
+      local task
+      task=$(gh_get_file "projects/${slug}/${item}/tasks/${tfile}" 2>/dev/null)
+      [ -z "$task" ] && continue
+      local t_name t_status
+      t_name=$(echo "$task" | jq -r '.name')
+      t_status=$(echo "$task" | jq -r '.status')
+      case "$t_status" in
+        done)    printf "    [x] %s\n" "$t_name" ;;
+        current) printf "    [>] %s\n" "$t_name" ;;
+        dropped) printf "    [-] %s\n" "$t_name" ;;
+        *)       printf "    [ ] %s\n" "$t_name" ;;
+      esac
+    done <<< "$tasks"
+  done <<< "$dirs"
+}
+
+# Tree sha of projects/ -- changes only when tracked data changes, unlike the
+# HEAD commit sha, which also moves for README, script and CI-rebuild commits.
+gh_projects_tree_sha() {
+  gh api "repos/${TRACKER_REPO}/contents?ref=main" \
+    --jq '.[] | select(.name=="projects") | .sha' 2>/dev/null || echo ""
+}
+
+open_dashboard() {
+  open "$1" 2>/dev/null || xdg-open "$1" 2>/dev/null || echo "Open ${1} in a browser"
+}
+
+# Directory holding this script, following symlinks (installs symlink it into
+# /usr/local/bin, so $0's dirname is not where the helpers live).
+script_dir() {
+  local src="${BASH_SOURCE[0]}" dir
+  while [ -L "$src" ]; do
+    dir=$(cd -P "$(dirname "$src")" && pwd)
+    src=$(readlink "$src")
+    [[ "$src" != /* ]] && src="${dir}/${src}"
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+
+# Pull the whole repo as one tarball and render it locally. The builder and the
+# template come from this install, since a data repo carries only projects/.
+# The tarball's copies are a fallback for a bare script whose tracker repo
+# still holds the tool.
+build_from_tarball() {
+  local outfile="$1" tmp status=0
+  tmp=$(mktemp -d)
+  (
+    set -e
+    gh api "repos/${TRACKER_REPO}/tarball/main" > "${tmp}/repo.tar.gz" 2>/dev/null
+    mkdir -p "${tmp}/repo"
+    tar xzf "${tmp}/repo.tar.gz" -C "${tmp}/repo" --strip-components=1
+    here="$(script_dir)"
+    builder="${here}/build-dashboard.py"
+    [ -f "$builder" ] || builder="${tmp}/repo/scripts/build-dashboard.py"
+    [ -f "$builder" ] || { echo "Error: build-dashboard.py not found" >&2; exit 1; }
+    template="${here}/../docs/index.html"
+    [ -f "$template" ] || template="${tmp}/repo/docs/index.html"
+    [ -f "$template" ] || { echo "Error: dashboard template docs/index.html not found" >&2; exit 1; }
+    python3 "$builder" "${tmp}/repo/projects" "$template" "$outfile" > /dev/null
+  ) || status=1
+  rm -rf "$tmp"
+  return $status
+}
+
+cmd_dashboard() {
+  local outfile="dashboard.html" do_open=false force=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --open) do_open=true; shift ;;
+      --force) force=true; shift ;;
+      -*) echo "Unknown option: $1"; usage ;;
+      *) outfile="$1"; shift ;;
+    esac
+  done
+
+  local sha_file="${outfile}.sha"
+  local remote_sha key
+  remote_sha=$(gh_projects_tree_sha)
+  # The installed builder and template are part of the key, so pulling a tool
+  # update rebuilds the page even when no tracked data changed.
+  key="${remote_sha} $(cat "$(script_dir)/build-dashboard.py" "$(script_dir)/../docs/index.html" 2>/dev/null | cksum || true)"
+
+  if ! $force && [ -f "$outfile" ] && [ -f "$sha_file" ] && [ -n "$remote_sha" ]; then
+    if [ "$(cat "$sha_file")" = "$key" ]; then
+      echo "Dashboard up to date (no changes since last build)."
+      if $do_open; then open_dashboard "$outfile"; fi
+      return 0
+    fi
+  fi
+
+  echo "Fetching project data..."
+  build_from_tarball "$outfile" || { echo "Error: could not build dashboard"; exit 1; }
+
+  [ -n "$remote_sha" ] && echo "$key" > "$sha_file"
+  echo "Dashboard written to: ${outfile}"
+  if $do_open; then open_dashboard "$outfile"; fi
+  return 0
+}
+
+[ $# -eq 0 ] && usage
+command="$1"; shift
+case "$command" in help|-h|--help) usage ;; esac
+resolve_tracker_repo
+case "$command" in
+  init-project)   cmd_init_project "$@" ;;
+  update-project) cmd_update_project "$@" ;;
+  init-wp)        cmd_init_wp "$@" ;;
+  update-wp)      cmd_update_wp "$@" ;;
+  add-task)       cmd_add_task "$@" ;;
+  update-task)    cmd_update_task "$@" ;;
+  list)           cmd_list ;;
+  show)           cmd_show "$@" ;;
+  dashboard)      cmd_dashboard "$@" ;;
+  *)              echo "Unknown command: $command"; usage ;;
+esac

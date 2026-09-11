@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Task",
+  "type": "object",
+  "required": ["name", "status", "created"],
+  "properties": {
+    "name": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["open", "current", "done", "dropped"]
+    },
+    "commits": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Commit URLs or short SHAs"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Brief context — decisions, blockers, outcome"
+    },
+    "created": { "type": "string", "format": "date-time" },
+    "updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last write through the CLI"
+    },
+    "edited": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last write through the dashboard"
+    }
+  }
+}

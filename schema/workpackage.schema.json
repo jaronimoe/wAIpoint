@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Work Package",
+  "type": "object",
+  "required": ["name", "status", "created"],
+  "properties": {
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["planned", "in-progress", "blocked", "done"]
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "blocked_by": {
+      "type": "string",
+      "description": "Slug of blocking work package, if any"
+    },
+    "created": { "type": "string", "format": "date-time" },
+    "updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last write through the CLI"
+    },
+    "edited": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last write through the dashboard"
+    }
+  }
+}

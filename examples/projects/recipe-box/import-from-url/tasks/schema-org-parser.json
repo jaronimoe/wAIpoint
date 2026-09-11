@@ -1,0 +1,8 @@
+{
+  "name": "Parse schema.org Recipe markup",
+  "status": "open",
+  "commits": [],
+  "notes": "Most recipe sites publish JSON-LD; fall back to headings when they don't. Imports go through the sync queue, hence the blocker.",
+  "created": "2026-07-20T10:01:00Z",
+  "updated": "2026-07-20T10:01:00Z"
+}

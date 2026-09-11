@@ -1,0 +1,26 @@
+{
+  // Template for wrangler.jsonc, which is per deployment: copy it, keep `name`
+  // equal to the Worker you created, and set TRACKER_REPO to your data repo.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "waipoint",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-08",
+  "assets": {
+    // Built by scripts/build-dashboard.sh; assets are matched before the Worker
+    // runs, so "/" serves the dashboard and only /api/* reaches src/index.js.
+    "directory": "./dist",
+    "not_found_handling": "none"
+  },
+  // Nothing needs per-deployment preview hostnames, and the Access policy
+  // should not be the only thing standing in front of a surface we do not use.
+  "preview_urls": false,
+
+  "vars": {
+    // The repo the dashboard's write API commits to -- the data repo, never
+    // the tool repo. The Worker's GITHUB_TOKEN should cover this repo only.
+    "TRACKER_REPO": "<owner>/<data-repo>"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

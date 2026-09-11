@@ -1,0 +1,10 @@
+{
+  "name": "Weekly distance and elevation summary",
+  "status": "current",
+  "commits": [
+    "https://github.com/example_owner/trail-log/commit/0d93a6e"
+  ],
+  "notes": "Totals work; the week boundary still ignores time zones.",
+  "created": "2026-05-10T09:01:00Z",
+  "updated": "2026-07-29T19:44:00Z"
+}

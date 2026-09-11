@@ -1,0 +1,14 @@
+{
+  "name": "Recipe Box",
+  "repos": [
+    "example_owner/recipe-box"
+  ],
+  "status": "active",
+  "description": "Offline-first recipe manager for the kitchen tablet",
+  "tags": [
+    "web",
+    "pwa"
+  ],
+  "created": "2026-06-02T09:14:00Z",
+  "updated": "2026-06-02T09:14:00Z"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Delete an account and its recipes",
+  "status": "done",
+  "commits": [
+    "https://github.com/example_owner/recipe-box/commit/5a7f3b8"
+  ],
+  "notes": "Shared recipes are copied to the other owner before the account goes.",
+  "created": "2026-06-02T09:22:00Z",
+  "updated": "2026-06-28T17:05:00Z"
+}
