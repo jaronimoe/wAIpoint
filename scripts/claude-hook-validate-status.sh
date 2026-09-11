@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # PreToolUse hook for Claude Code: validates --status values on waipoint commands.
-# Reads tool input JSON from stdin. Exits 2 to block invalid status values.
-set -euo pipefail
+# Reads tool input JSON from stdin. Exits 2 to block invalid status values and 0
+# on every other path, including input it can't parse. Any other exit code is a
+# non-blocking error that lets the command run, so no set -e or pipefail.
+set -u
 
-input=$(cat)
-tool=$(echo "$input" | grep -o '"tool_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+input=$(cat) || exit 0
 
-[ "$tool" = "Bash" ] || exit 0
-
+# Prints the command of a Bash tool call, nothing for other tools.
 command=$(echo "$input" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-print(data.get('tool_input', {}).get('command', ''))
+if data.get('tool_name') == 'Bash':
+    print(data.get('tool_input', {}).get('command', ''))
 " 2>/dev/null) || exit 0
 
 # Only check waipoint update commands
