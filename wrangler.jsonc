@@ -1,6 +1,7 @@
 {
-  // Template for wrangler.jsonc, which is per deployment: copy it, keep `name`
-  // equal to the Worker you created, and set TRACKER_REPO to your data repo.
+  // Base config for every deployment. The deploy action (action.yml) sets the
+  // Worker name and TRACKER_REPO per deployment with --name and --var, which
+  // take precedence over the values here.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "waipoint",
   "main": "src/index.js",
@@ -18,6 +19,7 @@
   "vars": {
     // The repo the dashboard's write API commits to -- the data repo, never
     // the tool repo. The Worker's GITHUB_TOKEN should cover this repo only.
+    // Placeholder: the deploy action replaces it.
     "TRACKER_REPO": "<owner>/<data-repo>"
   },
   "observability": {

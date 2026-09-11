@@ -361,12 +361,9 @@ template, not a build output — opening it directly shows an empty board.
 
 ## Hosting on Cloudflare
 
-> **Not available for a separate data repo yet.** The deploy workflow still
-> expects the tool and the data in one repo. A reusable workflow that your data
-> repo can call is in progress. Until it lands, use `waipoint dashboard`.
-
-The hosted dashboard runs as a Cloudflare Worker that GitHub Actions deploys on
-every data change. Both sides sit inside free tiers.
+The hosted dashboard runs as a Cloudflare Worker. A short workflow in your data
+repo rebuilds and deploys it on every data change, using the deploy action in
+this repo. Both sides sit inside free tiers.
 
 Two tokens are involved, pointing in opposite directions:
 
@@ -377,9 +374,9 @@ Order matters. A Worker that has only static assets cannot hold variables, so
 the GitHub token can only be added *after* the first real deploy.
 
 **1. Create the Worker.** Workers & Pages → Create → upload any placeholder
-`index.html`, and set the Worker name to `waipoint` — it must match `name` in
-your `wrangler.jsonc`, or the deploy creates a second, ungated Worker instead of
-updating this one. Deploy. Nothing sensitive goes up; the placeholder exists
+`index.html`, and set the Worker name to `waipoint`. That is the deploy action's
+default; if you choose another name, pass it as `worker-name` in step 4. A
+mismatch creates a second, ungated Worker instead of updating this one. Deploy. Nothing sensitive goes up; the placeholder exists
 only so the Worker exists.
 
 **2. Gate it before real data lands.** Zero Trust → Access → Policies → add a
@@ -412,7 +409,41 @@ Then in your data repo: Settings → Secrets and variables → Actions, and add
 `CLOUDFLARE_API_TOKEN` plus `CLOUDFLARE_ACCOUNT_ID`. The account ID is the first
 path segment of any dashboard URL: `dash.cloudflare.com/<account-id>/...`.
 
-**4. Deploy.** The workflow builds and deploys over the placeholder. The
+**4. Add the deploy workflow.** In your data repo, create
+`.github/workflows/dashboard.yml`:
+
+```yaml
+name: Deploy Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'projects/**'
+      - '.github/workflows/dashboard.yml'
+  workflow_dispatch:
+
+# Agents write in bursts, one commit per file, so keep only the latest run.
+concurrency:
+  group: dashboard-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jaronimoe/wAIpoint@v0.1.0
+        with:
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+```
+
+Push it. The workflow builds the page from your `projects/` and deploys over
+the placeholder, pointing the Worker's write API at your data repo. The
 dashboard is live behind the PIN prompt at this point, but read-only: the `+`
 buttons stay hidden because the write API reports itself unready.
 
@@ -432,11 +463,16 @@ survive.
 Reload the dashboard. The `+` buttons appearing is the confirmation that the
 token took.
 
+### Updating
+
+The tag in `uses: jaronimoe/wAIpoint@v0.1.0` is the version your dashboard runs.
+A new wAIpoint release changes nothing on your Worker until you bump that tag —
+a one-line commit in your data repo, and just as easy to revert.
+
 ### Troubleshooting
 
 | Symptom | Cause |
 |---------|-------|
-| `Missing entry-point` in CI | `wrangler-action` installs wrangler 3.90 by default, which predates jsonc config support and so never reads `wrangler.jsonc`. Pin `wranglerVersion: "4"`. |
 | `Variables cannot be added to a Worker that only has static assets` | The Worker has no script yet. Deploy once, then add the secret. |
 | No `+` buttons on the hosted page | `GITHUB_TOKEN` is not reaching the Worker. The readiness probe returns 503 and the page hides the controls by design. |
 | Writes fail with `unauthenticated (...)` | Access did not supply an identity. The message names which source came up empty. |
@@ -478,21 +514,26 @@ Work packages also carry a priority: `low`, `medium` or `high`.
 | `WAIPOINT_REPO` | environment | Overrides `repo=` |
 | `waipoint-data.json` | root of the data repo | Marks a data repo; the CLI refuses to write without it |
 
-The hosted Worker has its own settings:
+The hosted dashboard is configured in three places:
 
-| Binding | Kind | Set in | Purpose |
+| Setting | Kind | Set in | Purpose |
 |---------|------|--------|---------|
-| `GITHUB_TOKEN` | Secret | Cloudflare dashboard | Lets the Worker commit to your data repo |
-| `TRACKER_REPO` | Variable | `wrangler.jsonc` | Which repo the Worker writes to |
+| `GITHUB_TOKEN` | Worker secret | Cloudflare dashboard | Lets the Worker commit to your data repo |
+| `CLOUDFLARE_API_TOKEN` | Actions secret | data repo settings | Lets the workflow deploy the Worker |
+| `CLOUDFLARE_ACCOUNT_ID` | Actions secret | data repo settings | Which Cloudflare account to deploy into |
 
-| GitHub Actions secret | Purpose |
-|-----------------------|---------|
-| `CLOUDFLARE_API_TOKEN` | Lets CI deploy the Worker |
-| `CLOUDFLARE_ACCOUNT_ID` | Which Cloudflare account to deploy into |
+The deploy action takes these inputs:
 
-`wrangler.example.jsonc` is the template for your deployment's `wrangler.jsonc`:
-copy it, keep `name` equal to your Worker, and set `TRACKER_REPO` to your data
-repo.
+| Input | Default | Purpose |
+|-------|---------|---------|
+| `cloudflare-api-token` | required | Pass `secrets.CLOUDFLARE_API_TOKEN` |
+| `cloudflare-account-id` | required | Pass `secrets.CLOUDFLARE_ACCOUNT_ID` |
+| `worker-name` | `waipoint` | The Worker to deploy to |
+| `tracker-repo` | the repo running the workflow | Set as the Worker's `TRACKER_REPO`: where dashboard edits are committed |
+| `projects-dir` | `projects` | Where the projects live in the data repo |
+
+`wrangler.jsonc` in this repo is the base config every deployment shares; the
+action sets the Worker name and `TRACKER_REPO` on top of it.
 
 ### Repo layout
 
@@ -510,7 +551,8 @@ wAIpoint/
 ├── src/index.js                        # Worker: serves the page, handles writes
 ├── schema/                             # JSON schemas for project, work package, task
 ├── examples/projects/                  # Invented demo data
-└── wrangler.example.jsonc              # Template for your deployment's wrangler.jsonc
+├── action.yml                          # Deploy action your data repo's workflow calls
+└── wrangler.jsonc                      # Base Worker config the action deploys with
 ```
 
 ## Design principles

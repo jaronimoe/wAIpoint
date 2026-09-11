@@ -1,0 +1,60 @@
+name: Deploy wAIpoint dashboard
+description: Build the wAIpoint dashboard from a data repo's projects and deploy it to a Cloudflare Worker.
+
+# Run after actions/checkout of the data repo. The runner downloads this whole
+# repo at the ref in `uses:`, so that ref is the tool version you deploy.
+
+inputs:
+  cloudflare-api-token:
+    description: Cloudflare API token with Workers Scripts Edit and Account Settings Read.
+    required: true
+  cloudflare-account-id:
+    description: Cloudflare account to deploy into.
+    required: true
+  worker-name:
+    description: Name of the Worker. Must be the Worker your Access policy is attached to.
+    default: waipoint
+  tracker-repo:
+    description: Repo the dashboard's write API commits to, as owner/name.
+    default: ${{ github.repository }}
+  projects-dir:
+    description: Directory holding the projects, relative to the checked-out data repo.
+    default: projects
+
+runs:
+  using: composite
+  steps:
+    - name: Check inputs
+      shell: bash
+      env:
+        WORKER_NAME: ${{ inputs.worker-name }}
+        TRACKER_REPO: ${{ inputs.tracker-repo }}
+      run: |
+        [[ "$WORKER_NAME" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] \
+          || { echo "::error::worker-name '$WORKER_NAME' is not a valid Worker name"; exit 1; }
+        [[ "$TRACKER_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
+          || { echo "::error::tracker-repo '$TRACKER_REPO' is not in owner/name form"; exit 1; }
+
+    # Build from a copy: the action's own directory is the runner's action cache.
+    - name: Build dashboard
+      shell: bash
+      env:
+        PROJECTS_DIR: ${{ inputs.projects-dir }}
+      run: |
+        tool="$RUNNER_TEMP/waipoint"
+        rm -rf "$tool"
+        cp -R "$GITHUB_ACTION_PATH" "$tool"
+        mkdir -p "$tool/dist"
+        "$tool/scripts/build-dashboard.sh" "$PROJECTS_DIR" "$tool/docs/index.html" "$tool/dist/index.html"
+
+    - name: Deploy Worker
+      uses: cloudflare/wrangler-action@v3
+      with:
+        apiToken: ${{ inputs.cloudflare-api-token }}
+        accountId: ${{ inputs.cloudflare-account-id }}
+        # The action defaults to wrangler 3.90, which predates jsonc config
+        # support (3.91) and so would ignore wrangler.jsonc entirely.
+        wranglerVersion: "4"
+        workingDirectory: ${{ runner.temp }}/waipoint
+        # --name and --var override wrangler.jsonc, so one config serves every deployment.
+        command: deploy --name ${{ inputs.worker-name }} --var TRACKER_REPO:${{ inputs.tracker-repo }}
