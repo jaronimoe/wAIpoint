@@ -51,16 +51,19 @@ cd wAIpoint
 ./scripts/install.sh
 ```
 
-`install.sh` links the CLI into `/usr/local/bin` (that step uses `sudo`), the
-skill into `~/.agents/skills`, and the pi extension into
-`~/.pi/agent/extensions`. Every piece is a symlink into your clone, so
-`git pull` is how you update.
+`install.sh` links the CLI into `~/.local/bin`, without `sudo`, and offers to put
+that directory on your `PATH` if it is missing (`--bin-dir` picks another).
+Then it sets up each agent harness it finds:
 
-To avoid `sudo`, link the CLI into any directory on your `PATH` instead:
+- **pi**: the skill into `~/.agents/skills` and the extension into
+  `~/.pi/agent/extensions`.
+- **Claude Code**: the skill into `~/.claude/skills` and, once you agree, the
+  status hook into `~/.claude/settings.json` and a tracking section into
+  `~/.claude/CLAUDE.md`. It backs both files up first.
 
-```bash
-ln -s "$PWD/scripts/waipoint" ~/.local/bin/waipoint
-```
+Every piece is a symlink into your clone, so `git pull` is how you update, and
+running `install.sh` again is safe. `--yes` agrees to every edit; without a
+terminal it edits no config file and prints what to add instead.
 
 ### 2. Create your data repo
 
@@ -89,6 +92,10 @@ For the same reason, `init` only marks a repo it created or one that is still
 empty. Your project repos never need it — the CLI does not write to them.
 
 ### 3. Track a project
+
+In a repo you want tracked, ask your agent to set up wAIpoint tracking. The
+skill looks at the repo, proposes a structure, and asks you before it creates
+anything. Or create the project yourself:
 
 ```bash
 waipoint init-project my-app \
@@ -149,8 +156,9 @@ projects and tasks are only created when the user asks, and when the CLI refuses
 to run — no repo configured, no marker — the agent reports it instead of working
 around it.
 
-`install.sh` links the skill into `~/.agents/skills`, a shared discovery path.
-In pi you can list the directory in `settings.json` instead:
+When it finds pi, or that directory already exists, `install.sh` links the skill
+into `~/.agents/skills`, a shared discovery path. In pi you can list the
+directory in `settings.json` instead:
 
 ```json
 { "skills": ["/path/to/wAIpoint/skills"] }
@@ -158,7 +166,9 @@ In pi you can list the directory in `settings.json` instead:
 
 ### Claude Code
 
-Three pieces, all in `~/.claude/`.
+Three pieces, all in `~/.claude/`. When `install.sh` finds Claude Code it sets
+up all three, asking before it edits `settings.json` or `CLAUDE.md`. To do it by
+hand instead:
 
 **1. Skill** — link the skill directory:
 
@@ -193,21 +203,13 @@ That makes `/waipoint` available in every session. Link rather than copy, so a
 It checks `--status` on `waipoint update-*` commands before they run, blocks
 invalid values, and tells the agent which values are valid.
 
-**3. Global instructions** — add to `~/.claude/CLAUDE.md`:
+**3. Global instructions** — append
+[`scripts/claude-md-section.md`](scripts/claude-md-section.md) to
+`~/.claude/CLAUDE.md`. It has the agent run `waipoint show` at session start and
+record finished work against the matching task:
 
-```markdown
-## Project Tracking (wAIpoint)
-
-If `waipoint` is on PATH and this project is a git repo:
-
-1. At session start, derive the project slug from `git remote get-url origin`
-   (last path segment, lowercased) and run `waipoint show <slug>`.
-2. If tracked, follow `/waipoint` (Case 3) for steady-state updates.
-3. After committing significant work, check if it matches a task in the `show`
-   output and update it with `waipoint update-task`. If no task matches, ask
-   the user rather than skipping silently or creating a new task.
-4. If the project is not tracked, only set it up if the user explicitly asks —
-   then run `/waipoint` for the full procedure.
+```bash
+cat /path/to/wAIpoint/scripts/claude-md-section.md >> ~/.claude/CLAUDE.md
 ```
 
 ### Pi extension
@@ -224,8 +226,8 @@ If `waipoint` is on PATH and this project is a git repo:
 - **Commit follow-up** — when a `git commit` isn't followed by an
   `update-task`, a notice says the commit wasn't matched to a task.
 
-`install.sh` links it into `~/.pi/agent/extensions`. You can also list it in
-pi's `settings.json`:
+When it finds pi, `install.sh` links it into `~/.pi/agent/extensions`. You can
+also list it in pi's `settings.json`:
 
 ```json
 { "extensions": ["/path/to/wAIpoint/extensions/waipoint.ts"] }
@@ -544,8 +546,9 @@ wAIpoint/
 │   ├── waipoint                        # CLI (bash)
 │   ├── build-dashboard.sh              # Build wrapper
 │   ├── build-dashboard.py              # Splices project data into the template
-│   ├── install.sh                      # Links the CLI, skill and pi extension
-│   └── claude-hook-validate-status.sh  # Claude Code PreToolUse hook
+│   ├── install.sh                      # Links the CLI; sets up pi and Claude Code
+│   ├── claude-hook-validate-status.sh  # Claude Code PreToolUse hook
+│   └── claude-md-section.md            # Tracking section for ~/.claude/CLAUDE.md
 ├── skills/waipoint/                    # Agent skill: SKILL.md + case references
 ├── extensions/waipoint.ts              # Pi extension
 ├── docs/index.html                     # Dashboard template (data spliced in at build)
