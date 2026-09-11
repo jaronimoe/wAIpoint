@@ -64,36 +64,31 @@ ln -s "$PWD/scripts/waipoint" ~/.local/bin/waipoint
 
 ### 2. Create your data repo
 
-Run this outside your wAIpoint clone:
-
 ```bash
-gh repo create waipoint-data --private --clone
-cd waipoint-data
-printf '{\n  "schema": 1\n}\n' > waipoint-data.json
-git add waipoint-data.json
-git commit -m "Mark as a wAIpoint data repo"
-git branch -M main
-git push -u origin main
+waipoint init
 ```
 
-Keep the branch named `main`; the CLI reads from it.
+This creates a private repo named `<your-user>/waipoint-data`, marks it as a
+wAIpoint data repo, and points `~/.config/waipoint/config` at it. It asks before
+creating the repo; `--yes` skips the question.
 
-`waipoint-data.json` is what makes it a data repo. The CLI checks for it before
-every write and refuses to write anywhere without it, so a mistyped repo name
-fails loudly instead of creating files in some other repo. Your project repos
-never need it — the CLI does not write to them.
-
-### 3. Point the CLI at it
+If you already have a data repo — set up on another machine, or under another
+name — connect to it instead:
 
 ```bash
-mkdir -p ~/.config/waipoint
-echo 'repo=<your-user>/waipoint-data' > ~/.config/waipoint/config
+waipoint init --repo <owner>/<name>
 ```
 
-There is no default repo. `WAIPOINT_REPO`, when set, takes precedence over the
-config file.
+Running `init` again is safe: when the config already points at a data repo, it
+says so and changes nothing.
 
-### 4. Track a project
+The marker is a file at the root of the data repo, `waipoint-data.json`. The CLI
+checks for it before every write and refuses to write anywhere without it, so a
+mistyped repo name fails loudly instead of creating files in some other repo.
+For the same reason, `init` only marks a repo it created or one that is still
+empty. Your project repos never need it — the CLI does not write to them.
+
+### 3. Track a project
 
 ```bash
 waipoint init-project my-app \
@@ -115,7 +110,7 @@ Use the repo's name, lowercased, as the project slug. That is how agents find
 the project from inside the repo: they take the last segment of its `origin`
 URL and lowercase it.
 
-### 5. Let agents update it
+### 4. Let agents update it
 
 With the skill installed (see [Agent integration](#agent-integration)), agents
 make these calls themselves as they work:
@@ -484,6 +479,7 @@ a one-line commit in your data repo, and just as easy to revert.
 
 | Command | Description |
 |---------|-------------|
+| `init` | Create or connect your data repo and point the config at it (`--repo`, `--yes`) |
 | `init-project <slug>` | Create a project |
 | `update-project <slug>` | Update project status or description |
 | `init-wp <project> <wp>` | Create a work package |
@@ -513,6 +509,11 @@ Work packages also carry a priority: `low`, `medium` or `high`.
 | `repo=<owner>/<name>` | `~/.config/waipoint/config` | The data repo the CLI reads and writes |
 | `WAIPOINT_REPO` | environment | Overrides `repo=` |
 | `waipoint-data.json` | root of the data repo | Marks a data repo; the CLI refuses to write without it |
+
+`waipoint init` writes the `repo=` line. There is no default: with neither
+setting, every command but `init` stops and says so. The CLI follows the data
+repo's default branch, but the hosted dashboard commits to `main`, which is the
+branch `init` creates.
 
 The hosted dashboard is configured in three places:
 

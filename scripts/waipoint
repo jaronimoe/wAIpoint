@@ -4,10 +4,18 @@ set -euo pipefail
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/waipoint/config"
 TRACKER_REPO=""
 MARKER_FILE="waipoint-data.json"
+DEFAULT_DATA_REPO="waipoint-data"
+ASSUME_YES=false
 
 usage() {
   cat <<'EOF'
 Usage: waipoint <command> [options]
+
+Setup:
+  init                                Create or connect your data repo
+    --repo <[owner/]name>             Data repo (default: the configured repo,
+                                      else <your-login>/waipoint-data)
+    --yes                             Create or mark the repo without asking
 
 Project commands:
   init-project <slug>                 Create a new project
@@ -48,27 +56,35 @@ Read commands:
 
 Configuration:
   The tracker repo (owner/name) comes from WAIPOINT_REPO, or else from a
-  repo= line in ~/.config/waipoint/config. There is no default.
+  repo= line in ~/.config/waipoint/config, which `waipoint init` writes.
+  There is no default.
 EOF
   exit 1
 }
 
 now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
+valid_repo() { [[ "$1" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; }
+
+# The repo= line from the config file, or nothing.
+config_repo() {
+  [ -f "$CONFIG_FILE" ] || return 0
+  sed -n 's/^[[:space:]]*repo[[:space:]]*=[[:space:]]*//p' "$CONFIG_FILE" | tail -n 1 | tr -d '[:space:]'
+}
+
 # No default on purpose: a default that names the wrong repo does not fail, it
 # reads and writes somewhere else.
 resolve_tracker_repo() {
   TRACKER_REPO="${WAIPOINT_REPO:-}"
-  if [ -z "$TRACKER_REPO" ] && [ -f "$CONFIG_FILE" ]; then
-    TRACKER_REPO=$(sed -n 's/^[[:space:]]*repo[[:space:]]*=[[:space:]]*//p' "$CONFIG_FILE" | tail -n 1 | tr -d '[:space:]')
+  if [ -z "$TRACKER_REPO" ]; then
+    TRACKER_REPO=$(config_repo)
   fi
   if [ -z "$TRACKER_REPO" ]; then
-    echo "Error: no tracker repo configured. Set one with either:"
-    echo "  mkdir -p \"$(dirname "$CONFIG_FILE")\" && echo 'repo=<owner>/<data-repo>' > \"${CONFIG_FILE}\""
-    echo "  export WAIPOINT_REPO=<owner>/<data-repo>"
+    echo "Error: no tracker repo configured. Run 'waipoint init' to create or connect one,"
+    echo "or set WAIPOINT_REPO=<owner>/<data-repo>."
     exit 1
   fi
-  if ! [[ "$TRACKER_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  if ! valid_repo "$TRACKER_REPO"; then
     echo "Error: tracker repo '${TRACKER_REPO}' is not in owner/name form"
     exit 1
   fi
@@ -95,21 +111,40 @@ gh_get_sha_and_file() {
   printf '%s\n' "$out"
 }
 
+# Entry names in a directory of the tracker repo, one per line, or nothing when
+# it does not exist. On an HTTP error gh still prints the error body to stdout,
+# so a failed call must drop its output rather than append a fallback to it.
+gh_list_dir() {
+  local out
+  out=$(gh api "repos/${TRACKER_REPO}/contents/${1}" --jq '.[].name' 2>/dev/null) || return 0
+  printf '%s\n' "$out"
+}
+
+# Look for the marker in TRACKER_REPO. Returns 0 when it is there, 1 when it is
+# not (404), and 2 when the check itself failed, with gh's error in MARKER_ERR.
+MARKER_ERR=""
+check_marker() {
+  if MARKER_ERR=$(gh api "repos/${TRACKER_REPO}/contents/${MARKER_FILE}" --silent 2>&1); then
+    return 0
+  fi
+  [[ "$MARKER_ERR" == *"HTTP 404"* ]] && return 1
+  return 2
+}
+
 # Every write goes through gh_put_file, so this is the one place that stops a
 # write to a repo that is not a wAIpoint data repo. A repo name can be valid
 # and still wrong -- a typo, or an old name now owned by another repo -- and a
 # PUT without a sha would quietly create files there.
 require_data_repo() {
-  local err
-  if err=$(gh api "repos/${TRACKER_REPO}/contents/${MARKER_FILE}" --silent 2>&1); then
-    return
-  fi
-  if [[ "$err" == *"HTTP 404"* ]]; then
+  local marker=0
+  check_marker || marker=$?
+  [ "$marker" -eq 0 ] && return
+  if [ "$marker" -eq 1 ]; then
     echo "Error: ${TRACKER_REPO} has no ${MARKER_FILE} at its root (or your gh login cannot read it), so it is not a wAIpoint data repo. Nothing was written."
     echo "Check WAIPOINT_REPO or ${CONFIG_FILE}."
   else
     echo "Error: could not check ${TRACKER_REPO} for ${MARKER_FILE}. Nothing was written."
-    echo "$err"
+    echo "$MARKER_ERR"
   fi
   exit 1
 }
@@ -276,7 +311,7 @@ cmd_update_task() {
 
 cmd_list() {
   local projects
-  projects=$(gh api "repos/${TRACKER_REPO}/contents/projects" --jq '.[].name' 2>/dev/null || echo "")
+  projects=$(gh_list_dir projects)
   [ -z "$projects" ] && { echo "No projects tracked."; return; }
   while IFS= read -r slug; do
     [ "$slug" = ".gitkeep" ] && continue
@@ -300,7 +335,7 @@ cmd_show() {
   echo "=== $(echo "$state" | jq -r '.name') ==="
   echo "$state" | jq '{status, description, repos, tags, updated}'
   local dirs
-  dirs=$(gh api "repos/${TRACKER_REPO}/contents/projects/${slug}" --jq '.[].name' 2>/dev/null || echo "")
+  dirs=$(gh_list_dir "projects/${slug}")
   while IFS= read -r item; do
     [ "$item" = "project.json" ] && continue
     local wp
@@ -312,7 +347,7 @@ cmd_show() {
     wp_priority=$(echo "$wp" | jq -r '.priority // ""')
     printf "\n  [%s] %s (%s)\n" "$wp_status" "$wp_name" "$wp_priority"
     local tasks
-    tasks=$(gh api "repos/${TRACKER_REPO}/contents/projects/${slug}/${item}/tasks" --jq '.[].name' 2>/dev/null || echo "")
+    tasks=$(gh_list_dir "projects/${slug}/${item}/tasks")
     [ -z "$tasks" ] && continue
     while IFS= read -r tfile; do
       local task
@@ -333,9 +368,12 @@ cmd_show() {
 
 # Tree sha of projects/ -- changes only when tracked data changes, unlike the
 # HEAD commit sha, which also moves for README, script and CI-rebuild commits.
+# Like every other read and write here, it follows the default branch.
 gh_projects_tree_sha() {
-  gh api "repos/${TRACKER_REPO}/contents?ref=main" \
-    --jq '.[] | select(.name=="projects") | .sha' 2>/dev/null || echo ""
+  local out
+  out=$(gh api "repos/${TRACKER_REPO}/contents" \
+    --jq '.[] | select(.name=="projects") | .sha' 2>/dev/null) || return 0
+  printf '%s\n' "$out"
 }
 
 open_dashboard() {
@@ -343,7 +381,7 @@ open_dashboard() {
 }
 
 # Directory holding this script, following symlinks (installs symlink it into
-# /usr/local/bin, so $0's dirname is not where the helpers live).
+# a bin directory, so $0's dirname is not where the helpers live).
 script_dir() {
   local src="${BASH_SOURCE[0]}" dir
   while [ -L "$src" ]; do
@@ -363,7 +401,7 @@ build_from_tarball() {
   tmp=$(mktemp -d)
   (
     set -e
-    gh api "repos/${TRACKER_REPO}/tarball/main" > "${tmp}/repo.tar.gz" 2>/dev/null
+    gh api "repos/${TRACKER_REPO}/tarball" > "${tmp}/repo.tar.gz" 2>/dev/null
     mkdir -p "${tmp}/repo"
     tar xzf "${tmp}/repo.tar.gz" -C "${tmp}/repo" --strip-components=1
     here="$(script_dir)"
@@ -414,9 +452,153 @@ cmd_dashboard() {
   return 0
 }
 
+# Replace the config's repo= line and keep every other line. Written in place
+# rather than moved over, so a config file that is a symlink stays one.
+write_config_repo() {
+  local tmp
+  mkdir -p "$(dirname "$CONFIG_FILE")"
+  tmp=$(mktemp)
+  if [ -f "$CONFIG_FILE" ]; then
+    grep -v '^[[:space:]]*repo[[:space:]]*=' "$CONFIG_FILE" > "$tmp" || true
+  fi
+  printf 'repo=%s\n' "$1" >> "$tmp"
+  cat "$tmp" > "$CONFIG_FILE"
+  rm -f "$tmp"
+}
+
+# Ask before init creates or marks a repo. --yes answers for the user; without
+# a terminal nobody can answer, so it declines and says how to go ahead.
+confirm() {
+  $ASSUME_YES && return 0
+  if ! [ -t 0 ]; then
+    echo "No terminal to answer on; run again with --yes to go ahead."
+    return 1
+  fi
+  local answer
+  printf '%s [Y/n] ' "$1"
+  read -r answer || return 1
+  case "$answer" in ""|[Yy]|[Yy][Ee][Ss]) return 0 ;; *) return 1 ;; esac
+}
+
+# Whether TRACKER_REPO has no commits yet; GitHub answers 409 for an empty repo.
+repo_is_empty() {
+  local err
+  err=$(gh api "repos/${TRACKER_REPO}/commits?per_page=1" --silent 2>&1) && return 1
+  [[ "$err" == *"HTTP 409"* ]]
+}
+
+# Only ever called on an empty repo. There the Contents API creates the branch
+# it is given and makes it the default, so the repo starts on main -- the branch
+# the hosted dashboard commits to.
+put_marker() {
+  local body
+  body=$(jq -n --arg c "$(printf '{\n  "schema": 1\n}\n' | base64)" \
+    '{message: "Mark as a wAIpoint data repo", content: $c, branch: "main"}')
+  gh api "repos/${TRACKER_REPO}/contents/${MARKER_FILE}" --method PUT --input - <<< "$body" > /dev/null
+}
+
+cmd_init() {
+  local repo=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo)
+        [ $# -ge 2 ] || { echo "Error: --repo needs a repo name"; exit 1; }
+        repo="$2"; shift 2 ;;
+      --yes|-y) ASSUME_YES=true; shift ;;
+      *) echo "Unknown option: $1"; usage ;;
+    esac
+  done
+
+  command -v gh > /dev/null || { echo "Error: gh (GitHub CLI) is not installed. See https://cli.github.com"; exit 1; }
+  command -v jq > /dev/null || { echo "Error: jq is not installed."; exit 1; }
+  local login
+  login=$(gh api user --jq .login 2>/dev/null) \
+    || { echo "Error: gh is not logged in, or GitHub is unreachable. Run 'gh auth login' first."; exit 1; }
+
+  # --repo wins, then the repo already configured, then a new default. Not
+  # WAIPOINT_REPO: init manages the config file, and the variable is how one
+  # shell points somewhere else for a while.
+  local configured
+  configured=$(config_repo)
+  [ -n "$repo" ] || repo="${configured:-${login}/${DEFAULT_DATA_REPO}}"
+  [[ "$repo" == */* ]] || repo="${login}/${repo}"
+  valid_repo "$repo" || { echo "Error: '${repo}' is not in owner/name form"; exit 1; }
+  TRACKER_REPO="$repo"
+
+  local info private="" branch="" can_push="" changed=false
+  if info=$(gh api "repos/${repo}" --jq '[.private, .default_branch, .permissions.push] | @tsv' 2>&1); then
+    IFS=$'\t' read -r private branch can_push <<< "$info"
+    local marker=0
+    check_marker || marker=$?
+    if [ "$marker" -eq 2 ]; then
+      echo "Error: could not check ${repo} for ${MARKER_FILE}."
+      echo "$MARKER_ERR"
+      exit 1
+    elif [ "$marker" -eq 0 ]; then
+      echo "${repo} is a wAIpoint data repo."
+    elif repo_is_empty; then
+      # Nothing in it to mistake for data. This is also how a create whose
+      # marker write failed gets finished.
+      echo "${repo} exists and is empty."
+      confirm "Mark it as your wAIpoint data repo?" || { echo "Nothing was changed."; exit 1; }
+      put_marker
+      echo "Marked ${repo} as a wAIpoint data repo."
+      branch=main changed=true
+    else
+      echo "Error: ${repo} already exists and has no ${MARKER_FILE} at its root, so it is not a wAIpoint data repo. Nothing was changed."
+      echo "Pick another name with --repo. If ${repo} really should hold your wAIpoint data, add ${MARKER_FILE} containing {\"schema\": 1} to its root yourself, then run waipoint init again."
+      exit 1
+    fi
+  elif [[ "$info" == *"HTTP 404"* ]]; then
+    echo "${repo} does not exist yet. If you already have a data repo, run: waipoint init --repo <owner>/<name>"
+    confirm "Create ${repo} as a private repo?" || { echo "Nothing was created."; exit 1; }
+    gh repo create "$repo" --private --description "wAIpoint data repo (https://github.com/jaronimoe/wAIpoint)" > /dev/null
+    put_marker || { echo "Error: created ${repo} but could not write ${MARKER_FILE}. Run 'waipoint init --repo ${repo}' again to finish."; exit 1; }
+    echo "Created private repo ${repo} and marked it as a wAIpoint data repo."
+    private=true branch=main can_push=true changed=true
+  else
+    echo "Error: could not look up ${repo}."
+    echo "$info"
+    exit 1
+  fi
+
+  if [ "$repo" != "$configured" ]; then
+    write_config_repo "$repo"
+    if [ -n "$configured" ]; then
+      echo "Switched ${CONFIG_FILE} from ${configured} to ${repo}."
+    else
+      echo "Wrote repo=${repo} to ${CONFIG_FILE}."
+    fi
+    changed=true
+  fi
+
+  [ "$private" = "false" ] && echo "Warning: ${repo} is public, so anyone can read your project data."
+  [ "$can_push" = "false" ] && echo "Warning: your gh login cannot write to ${repo}, so updates will fail."
+  [ "$branch" = "main" ] || echo "Note: ${repo}'s default branch is ${branch}. The CLI follows it, but the hosted dashboard commits to main."
+  if [ -n "${WAIPOINT_REPO:-}" ] && [ "$WAIPOINT_REPO" != "$repo" ]; then
+    echo "Note: WAIPOINT_REPO is set to ${WAIPOINT_REPO}, which overrides the config while it is set."
+  fi
+
+  if ! $changed; then
+    echo "Already set up: ${CONFIG_FILE} points at ${repo}."
+    return 0
+  fi
+  cat <<'EOF'
+
+Next, track a project: in one of your repos, ask your agent to set up wAIpoint
+tracking, or run
+  waipoint init-project <slug> --repo <owner>/<repo>
+For a hosted dashboard, see "Hosting on Cloudflare" in the wAIpoint README.
+EOF
+}
+
 [ $# -eq 0 ] && usage
 command="$1"; shift
-case "$command" in help|-h|--help) usage ;; esac
+case "$command" in
+  help|-h|--help) usage ;;
+  # init runs before any repo is configured, so it picks its own.
+  init) cmd_init "$@"; exit 0 ;;
+esac
 resolve_tracker_repo
 case "$command" in
   init-project)   cmd_init_project "$@" ;;
