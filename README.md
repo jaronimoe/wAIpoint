@@ -43,6 +43,15 @@ You need an authenticated [`gh`](https://cli.github.com) (GitHub CLI), plus
 `jq`, `python3` and `tar` — all present by default on macOS and most Linux
 distributions.
 
+**On Windows**, run everything inside
+[WSL](https://learn.microsoft.com/windows/wsl/install): the CLI and the
+installer are bash scripts, so they do not run in PowerShell or cmd. Install
+your agent harness inside WSL as well — one installed on Windows itself cannot
+run a `waipoint` that lives in WSL — and keep your clone in the Linux home
+directory rather than under `/mnt/c`. Git Bash is not a good substitute: it can
+turn the installer's symlinks into copies, which then stop updating on
+`git pull`.
+
 ### 1. Install
 
 ```bash
