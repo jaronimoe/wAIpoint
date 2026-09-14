@@ -327,6 +327,15 @@ The extra width buys four things a 340px column has no room for:
 
 Clicking a row in any panel opens its work package and scrolls to it.
 
+### Archived projects
+
+The board lists active projects first, then paused, then completed, each group
+in slug order. Archived projects are left off it and out of its counts. When
+there are any, **Archived (N)** opens them as a board of their own
+(`…/#:archived`), and **← All projects** returns. A project opened from there
+leads back to the archive. Archiving a project from the dashboard moves it
+there as soon as the edit saves.
+
 ### Edit from the dashboard
 
 The hosted dashboard is not read-only. Each project header carries a `+` that

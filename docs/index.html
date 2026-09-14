@@ -301,6 +301,8 @@
   @keyframes wp-flash { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 25%, 65% { box-shadow: 0 0 0 3px var(--accent-dim); } }
   .wp.flash { animation: wp-flash 1.2s ease; }
   .empty { text-align: center; color: var(--text-3); padding: 3rem 1rem; font-size: 0.92rem; }
+  .board > .empty { flex: 1; }
+  .empty .ctl-btn { margin-left: 0.4rem; }
   .add-btn { margin-left: auto; flex-shrink: 0; background: none; border: 1px solid var(--border); color: var(--text-3); border-radius: 4px; width: 1.4rem; height: 1.4rem; line-height: 1; font-size: 0.95rem; cursor: pointer; font-family: 'JetBrains Mono', monospace; padding: 0; }
   .add-btn:hover { color: var(--accent); border-color: var(--accent); }
   /* Inline editors. With the write API up, a status badge, a priority or a task
@@ -349,6 +351,7 @@
   <div class="statsbar">
     <div class="stats" id="stats"></div>
     <div class="controls">
+      <button class="ctl-btn" type="button" id="archiveBtn" hidden></button>
       <label class="ctl" title="Hide done and dropped tasks"><input type="checkbox" id="openOnly">Open tasks only</label>
       <button class="ctl-btn" type="button" id="collapseAll">Collapse all</button>
     </div>
@@ -459,34 +462,65 @@ const fullTime = ms => new Date(ms).toLocaleString('en-US', {
 });
 
 /* ---- routing --------------------------------------------------------
-   A project slug in the location hash selects the focus view: that project
-   alone, at full width, with the panels a 340px column has no room for.
-   Keeping it in the URL makes a focused project linkable and lets Back out. */
+   The location hash selects the view. A project slug selects the focus view:
+   that project alone, at full width, with the panels a 340px column has no
+   room for. ARCHIVE selects the archive, a board of the archived projects the
+   main board leaves out. Keeping the view in the URL makes it linkable and
+   lets Back out. */
+
+// Slugs are kebab-case, so no project can take this hash.
+const ARCHIVE = ':archived';
 
 let renderedFor;
 
+const hashValue = () => decodeURIComponent(location.hash.replace(/^#/, ''));
+
 function focusSlug() {
-  const raw = decodeURIComponent(location.hash.replace(/^#/, ''));
+  const raw = hashValue();
   return raw && DATA.projects.some(p => p.slug === raw) ? raw : null;
 }
 
-function openFocus(slug) {
-  history.pushState({ pvFocus: true }, '', '#' + encodeURIComponent(slug));
+const inArchive = () => hashValue() === ARCHIVE;
+
+// The view on screen: a project slug, ARCHIVE, or null for the board.
+const route = () => focusSlug() || (inArchive() ? ARCHIVE : null);
+
+// Each view pushed on top of the board records the view it was opened from.
+function openRoute(to) {
+  history.pushState({ pvFocus: true, from: route() }, '', '#' + (to === ARCHIVE ? to : encodeURIComponent(to)));
   render();
   syncCollapseBtn();
-  document.getElementById('projects').scrollTop = 0;
+  const main = document.getElementById('projects');
+  main.scrollTop = 0;
+  main.scrollLeft = 0;
 }
 
+const openFocus = slug => openRoute(slug);
+const openArchive = () => openRoute(ARCHIVE);
+
+// A focused project leaves for the view that lists it, the archive for the
+// board. Going back keeps that view's scroll position, but only when it is
+// the view this one was opened from; a link opened straight into a view has
+// nothing behind it, so there the entry is replaced instead.
 function exitFocus() {
-  // Going back keeps the board's scroll position. A link opened straight into
-  // a project has no board entry behind it, so there the hash is just dropped.
-  if (history.state && history.state.pvFocus) return history.back();
-  history.replaceState(null, '', location.pathname + location.search);
+  const slug = focusSlug();
+  const project = slug && DATA.projects.find(p => p.slug === slug);
+  const to = project && isArchived(project) ? ARCHIVE : null;
+  if (history.state && history.state.pvFocus && history.state.from === to) return history.back();
+  history.replaceState(null, '', location.pathname + location.search + (to ? '#' + to : ''));
   render();
   syncCollapseBtn();
 }
 
 /* ---- shared pieces --------------------------------------------------- */
+
+const isArchived = p => p.status === 'archived';
+
+// Active, then paused, then completed. The build lists projects by slug and
+// sort is stable, so each group stays in slug order.
+const projectStatusOrder = { active: 0, paused: 1, completed: 2 };
+const sortProjects = projects => projects.slice().sort((a, b) =>
+  (projectStatusOrder[a.status] ?? 0) - (projectStatusOrder[b.status] ?? 0));
 
 const prioOrder = { high: 0, medium: 1, low: 2 };
 const wpStatusOrder = { 'in-progress': 0, 'blocked': 1, 'planned': 2, 'done': 3 };
@@ -773,7 +807,7 @@ function focusView(p) {
   const wps = sortWps(p.workpackages || []);
   const cards = wps.map(wp => wpCard(p, wp, latest, edit)).join('');
   return `<div class="focus-head">
-    <button class="back-btn" type="button" data-exit="1">&larr; All projects</button>
+    <button class="back-btn" type="button" data-exit="1">&larr; ${isArchived(p) ? 'Archived projects' : 'All projects'}</button>
     <div class="project-header"><h2 class="project-name">${esc(p.name)}</h2>${projectBadge(p)}${WRITE ? `<button class="add-btn" data-add="wp" data-project="${p.slug}" title="Add work package">+</button>` : ''}</div>
     ${p.description ? `<p class="project-desc">${esc(p.description)}</p>` : ''}
     <div class="project-meta">${repoLinks(p)} ${tagChips(p)}</div>
@@ -839,11 +873,19 @@ function render() {
     }) : '';
 
   const slug = focusSlug();
-  renderedFor = slug;
-  if (!slug && location.hash) history.replaceState(null, '', location.pathname + location.search);
+  const archive = inArchive();
+  renderedFor = route();
+  if (!renderedFor && location.hash) history.replaceState(null, '', location.pathname + location.search);
   const project = slug ? projects.find(p => p.slug === slug) : null;
   const main = document.getElementById('projects');
   const stats = document.getElementById('stats');
+
+  // In the archive the button leads back; elsewhere it only shows when there
+  // is something archived to open.
+  const archived = projects.filter(isArchived);
+  const archiveBtn = document.getElementById('archiveBtn');
+  archiveBtn.hidden = !archive && !archived.length;
+  archiveBtn.textContent = archive ? '← All projects' : `Archived (${archived.length})`;
 
   if (project) {
     const t = tally([project]);
@@ -859,14 +901,16 @@ function render() {
     return;
   }
 
-  const t = tally(projects);
-  stats.innerHTML = stat(projects.length, plural(projects.length, 'project'))
+  const shown = archive ? archived : sortProjects(projects.filter(p => !isArchived(p)));
+  const t = tally(shown);
+  stats.innerHTML = stat(shown.length, `${archive ? 'archived ' : ''}${plural(shown.length, 'project')}`)
     + stat(t.wps, plural(t.wps, 'work package'))
     + stat(`${t.done}/${t.tasks}`, 'tasks done');
   main.className = 'board';
-  main.innerHTML = projects.length
-    ? projects.map(projectColumn).join('')
-    : '<div class="empty">No projects yet. Run <code>waipoint init-project &lt;slug&gt;</code> to start.</div>';
+  let empty = '<div class="empty">No projects yet. Run <code>waipoint init-project &lt;slug&gt;</code> to start.</div>';
+  if (archive) empty = '<div class="empty">No archived projects.</div>';
+  else if (archived.length) empty = `<div class="empty">No active projects.<button class="ctl-btn" type="button" data-archive="1">Archived (${archived.length})</button></div>`;
+  main.innerHTML = shown.length ? shown.map(projectColumn).join('') : empty;
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 // esc() leaves quotes alone, which is fine inside an element but would break
@@ -961,6 +1005,7 @@ document.getElementById('projects').addEventListener('click', e => {
     return;
   }
   if (e.target.closest('[data-exit]')) return exitFocus();
+  if (e.target.closest('[data-archive]')) return openArchive();
   const goto = e.target.closest('[data-goto]');
   if (goto) return revealWp(goto.dataset.goto);
   const head = e.target.closest('[data-focus]');
@@ -1176,14 +1221,18 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape' || dlg.open) return;
   // Esc closes an open edit menu first; only the next one leaves the project.
   if (editing) { if (!editing.busy) closeMenu({ restoreFocus: true }); return; }
-  if (focusSlug()) exitFocus();
+  if (route()) exitFocus();
 });
 
 // pushState does not fire either event; these cover Back, Forward and a hash
 // typed into the address bar.
-const routeChanged = () => { if (focusSlug() !== renderedFor) { render(); syncCollapseBtn(); } };
+const routeChanged = () => { if (route() !== renderedFor) { render(); syncCollapseBtn(); } };
 window.addEventListener('popstate', routeChanged);
 window.addEventListener('hashchange', routeChanged);
+
+document.getElementById('archiveBtn').addEventListener('click', () => {
+  if (inArchive()) exitFocus(); else openArchive();
+});
 
 /* ---- view controls --------------------------------------------------- */
 

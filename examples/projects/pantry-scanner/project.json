@@ -1,0 +1,14 @@
+{
+  "name": "Pantry Scanner",
+  "repos": [
+    "example_owner/pantry-scanner"
+  ],
+  "status": "archived",
+  "description": "Scan barcodes to keep a pantry inventory; folded into Recipe Box",
+  "tags": [
+    "android",
+    "kotlin"
+  ],
+  "created": "2026-02-03T10:00:00Z",
+  "updated": "2026-03-21T16:30:00Z"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Look up products in an open food database",
+  "status": "dropped",
+  "commits": [],
+  "notes": "Moved to Recipe Box's shopping list instead of a separate app.",
+  "created": "2026-02-03T10:07:00Z",
+  "updated": "2026-03-21T16:30:00Z"
+}

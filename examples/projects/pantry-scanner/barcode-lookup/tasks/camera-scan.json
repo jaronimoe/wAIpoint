@@ -1,0 +1,10 @@
+{
+  "name": "Scan EAN-13 barcodes with the camera",
+  "status": "done",
+  "commits": [
+    "https://github.com/example_owner/pantry-scanner/commit/5b1c0e2"
+  ],
+  "notes": "",
+  "created": "2026-02-03T10:06:00Z",
+  "updated": "2026-02-19T21:12:00Z"
+}
