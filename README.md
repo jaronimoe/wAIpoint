@@ -142,6 +142,10 @@ waipoint update-task my-app wp-auth implement-oauth \
 
 # Move a work package along
 waipoint update-wp my-app wp-auth --status in-progress
+
+# Record what a work package waits on, and why (this also sets it to blocked)
+waipoint update-wp my-app wp-auth --blocked-by wp-api \
+  --notes "Needs the session endpoint from wp-api"
 ```
 
 ## Agent integration
@@ -311,8 +315,9 @@ The extra width buys four things a 340px column has no room for:
   date: `project.json` only records its own last write, so it goes stale while
   the tasks move.
 - **Needs attention** — blocked work packages (naming the blocker when
-  `blocked_by` is set), tasks marked `current`, and high-priority work packages
-  that still have open tasks. Nothing to flag means no panel.
+  `blocked_by` is set, with their notes), tasks marked `current`, and
+  high-priority work packages that still have open tasks. Nothing to flag
+  means no panel.
 - **Recent updates** — every task by `updated`, plus every manual edit (marked
   with the pencil) to a task, a work package or the project by `edited`, newest
   first, grouped by day. It shows when a record was last written and where it
@@ -346,7 +351,8 @@ An edit sends only the field that changed. The Worker applies it to the file as
 it stands at the commit it builds on, not to the page's copy, which dates from
 the last deploy — so nothing an agent wrote since then gets reverted, and the
 page takes the fresh record back without waiting for the redeploy. Picking the
-value a record already has commits nothing.
+value a record already has commits nothing. Moving a work package off `blocked`
+also clears its `blocked_by`, as the CLI does.
 
 The commit is unforced, so an agent writing through the CLI at the same moment
 wins and the dashboard retries against the new head rather than overwriting it.
@@ -494,7 +500,7 @@ a one-line commit in your data repo, and just as easy to revert.
 | `init-project <slug>` | Create a project |
 | `update-project <slug>` | Update project status or description |
 | `init-wp <project> <wp>` | Create a work package |
-| `update-wp <project> <wp>` | Update work package status or priority |
+| `update-wp <project> <wp>` | Update a work package's status, priority, description or notes, or record what blocks it |
 | `add-task <project> <wp> <task>` | Add a task |
 | `update-task <project> <wp> <task>` | Update a task's status, append a commit, set notes |
 | `list` | List all projects |

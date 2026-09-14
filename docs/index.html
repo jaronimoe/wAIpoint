@@ -170,6 +170,8 @@
   .wp-header { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.1rem; }
   .wp-name { font-family: 'JetBrains Mono', monospace; font-weight: 500; font-size: 0.88rem; margin: 0; }
   .wp-desc { font-size: 0.78rem; color: var(--text-3); margin: 0 0 0.6rem; }
+  .wp-notes { font-size: 0.75rem; color: var(--text-2); margin: 0 0 0.6rem; padding-left: 0.5rem; border-left: 2px solid var(--border); line-height: 1.4; }
+  .wp-blocker { display: block; font-family: 'JetBrains Mono', monospace; font-size: 0.66rem; color: var(--blocked); }
   .priority { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
   .priority-high { color: var(--blocked); }
   .progress-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
@@ -520,6 +522,14 @@ const stat = (value, label) =>
 
 const plural = (n, word) => `${word}${n === 1 ? '' : 's'}`;
 
+// "waiting on <name>" for a blocked work package that records its blocker, by
+// name when the blocker is in the project, by slug otherwise.
+function waitingOn(p, wp) {
+  if (wp.status !== 'blocked' || !wp.blocked_by) return '';
+  const by = (p.workpackages || []).find(w => w.slug === wp.blocked_by);
+  return `waiting on ${by ? by.name : wp.blocked_by}`;
+}
+
 function tally(projects) {
   let wps = 0, tasks = 0, done = 0, commits = 0, last = 0, first = 0;
   for (const p of projects) {
@@ -570,6 +580,9 @@ function wpCard(p, wp, latest, edit) {
   const status = editBtn(`badge badge-${wp.status}`, wp.status.replace('-', ' '), rec, 'status', wp.status);
   const priority = wp.priority || WRITE
     ? editBtn(`priority${priorityCls}`, wp.priority || 'priority', rec, 'priority', wp.priority || '') : '';
+  const waiting = waitingOn(p, wp);
+  const notes = waiting || wp.notes
+    ? `<p class="wp-notes">${waiting ? `<span class="wp-blocker">${esc(waiting)}</span>` : ''}${esc(wp.notes || '')}</p>` : '';
   return `<details class="wp" data-key="${escAttr(key)}"${collapsed.has(key) ? '' : ' open'}>
     <summary class="wp-summary">
       <span class="chev"></span>
@@ -580,6 +593,7 @@ function wpCard(p, wp, latest, edit) {
     </summary>
     <div class="wp-body">
       ${wp.description ? `<p class="wp-desc">${esc(wp.description)}</p>` : ''}
+      ${notes}
       ${tasks.length ? `<ul class="tasks">${taskHtml}</ul>` : ''}
       ${tasks.length && !openTasks ? '<div class="wp-alldone">No open tasks</div>' : ''}
     </div>
@@ -641,13 +655,12 @@ function overview(p, t, edit) {
 
 function attentionPanel(p, wps) {
   const rows = [];
-  const bySlug = slug => (p.workpackages || []).find(w => w.slug === slug);
+  // The meta line is cut to one line, so its title carries the whole of it.
   const row = (kind, label, name, meta, wpSlug) =>
-    `<button class="attn" type="button" data-goto="${escAttr(wpSlug)}"><span class="attn-kind attn-${kind}">${label}</span><span class="attn-body"><span class="attn-name">${esc(name)}</span><span class="attn-meta">${esc(meta)}</span></span></button>`;
+    `<button class="attn" type="button" data-goto="${escAttr(wpSlug)}"><span class="attn-kind attn-${kind}">${label}</span><span class="attn-body"><span class="attn-name">${esc(name)}</span><span class="attn-meta" title="${escAttr(meta)}">${esc(meta)}</span></span></button>`;
   for (const wp of wps) {
     if (wp.status !== 'blocked') continue;
-    const by = wp.blocked_by ? bySlug(wp.blocked_by) : null;
-    const meta = wp.blocked_by ? `waiting on ${by ? by.name : wp.blocked_by}` : 'no blocker recorded';
+    const meta = [waitingOn(p, wp), wp.notes].filter(Boolean).join(' — ') || 'no blocker recorded';
     rows.push(row('blocked', 'blocked', wp.name, meta, wp.slug));
   }
   for (const wp of wps) {
@@ -1144,7 +1157,10 @@ function applyUpdated({ kind, project, wp, task }, doc) {
   let rec = DATA.projects.find(p => p.slug === project);
   if (rec && kind !== 'project') rec = (rec.workpackages || []).find(w => w.slug === wp);
   if (rec && kind === 'task') rec = (rec.tasks || []).find(t => t.slug === task);
-  if (rec) Object.assign(rec, doc);
+  if (!rec) return;
+  // A field the Worker removed (a cleared blocked_by) has to go here too.
+  if (kind === 'wp' && !('blocked_by' in doc)) delete rec.blocked_by;
+  Object.assign(rec, doc);
 }
 
 document.getElementById('projects').addEventListener('keydown', e => {

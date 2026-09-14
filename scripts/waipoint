@@ -33,10 +33,16 @@ Work package commands:
     --name <name>                     Human-readable name (default: slug)
     --description <desc>              Description
     --priority <low|medium|high>      Priority level
+    --notes <text>                    Notes
 
   update-wp <project> <wp-slug>       Update work package
     --status <status>                 planned|in-progress|blocked|done
     --priority <low|medium|high>      Priority level
+    --description <desc>              Update description
+    --notes <text>                    Set notes ("" clears them)
+    --blocked-by <wp-slug>            Work package this one waits on; sets
+                                      status to blocked ("" clears it).
+                                      Leaving blocked clears it too.
 
 Task commands:
   add-task <project> <wp> <task-slug> Add a task
@@ -228,12 +234,13 @@ cmd_update_project() {
 cmd_init_wp() {
   local project="${1:-}" wp="${2:-}"; shift 2 || true
   [ -z "$project" ] || [ -z "$wp" ] && { echo "Error: project and wp slug required"; usage; }
-  local name="$wp" description="" priority="medium"
+  local name="$wp" description="" priority="medium" notes=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --name) name="$2"; shift 2 ;;
       --description) description="$2"; shift 2 ;;
       --priority) priority="$2"; shift 2 ;;
+      --notes) notes="$2"; shift 2 ;;
       *) echo "Unknown option: $1"; usage ;;
     esac
   done
@@ -241,8 +248,8 @@ cmd_init_wp() {
   local state
   state=$(jq -n \
     --arg name "$name" --arg description "$description" --arg status "planned" \
-    --arg priority "$priority" --arg created "$now" --arg updated "$now" \
-    '{name:$name, description:$description, status:$status, priority:$priority, created:$created, updated:$updated}')
+    --arg priority "$priority" --arg notes "$notes" --arg created "$now" --arg updated "$now" \
+    '{name:$name, description:$description, status:$status, priority:$priority, notes:$notes, created:$created, updated:$updated}')
   gh_put_file "projects/${project}/${wp}/workpackage.json" "$state" "init wp: ${project}/${wp}"
   echo "Created work package: ${project}/${wp}"
 }
@@ -250,16 +257,49 @@ cmd_init_wp() {
 cmd_update_wp() {
   local project="${1:-}" wp="${2:-}"; shift 2 || true
   [ -z "$project" ] || [ -z "$wp" ] && { echo "Error: project and wp slug required"; usage; }
-  local args=()
+  # One jq filter over the stored record. Seeded with the timestamp, so the
+  # argument array is never empty (bash 3.2 treats that as unbound under set -u).
+  local filter='.updated = $ts' args=(--arg ts "$(now_iso)")
+  local status="" blocker="" has_blocker=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --status) args+=(status "$2"); shift 2 ;;
-      --priority) args+=(priority "$2"); shift 2 ;;
-      --description) args+=(description "$2"); shift 2 ;;
+      --status) status="$2"; shift 2 ;;
+      --priority) filter+=' | .priority = $priority'; args+=(--arg priority "$2"); shift 2 ;;
+      --description) filter+=' | .description = $description'; args+=(--arg description "$2"); shift 2 ;;
+      --notes) filter+=' | .notes = $notes'; args+=(--arg notes "$2"); shift 2 ;;
+      --blocked-by) blocker="$2"; has_blocker=true; shift 2 ;;
       *) echo "Unknown option: $1"; usage ;;
     esac
   done
-  gh_update_json "projects/${project}/${wp}/workpackage.json" "update wp: ${project}/${wp}" "${args[@]}"
+
+  # blocked_by only means something while the work package is blocked: naming a
+  # blocker blocks it, and moving it to any other status drops the blocker.
+  if $has_blocker && [ -n "$blocker" ]; then
+    if [ -n "$status" ] && [ "$status" != "blocked" ]; then
+      echo "Error: --blocked-by sets the status to blocked, so it cannot be combined with --status ${status}"
+      exit 1
+    fi
+    [ "$blocker" = "$wp" ] && { echo "Error: a work package cannot block itself"; exit 1; }
+    if [ -z "$(gh_get_sha "projects/${project}/${blocker}/workpackage.json")" ]; then
+      echo "Error: work package '${blocker}' not found in ${project}"
+      exit 1
+    fi
+    status="blocked"
+    filter+=' | .blocked_by = $blocker'; args+=(--arg blocker "$blocker")
+  elif $has_blocker || { [ -n "$status" ] && [ "$status" != "blocked" ]; }; then
+    filter+=' | del(.blocked_by)'
+  fi
+  if [ -n "$status" ]; then
+    filter+=' | .status = $status'; args+=(--arg status "$status")
+  fi
+
+  local path="projects/${project}/${wp}/workpackage.json"
+  local raw sha updated
+  raw=$(gh_get_sha_and_file "$path")
+  [ -z "$raw" ] && { echo "Error: ${path} not found"; exit 1; }
+  sha=${raw%%$'\n'*}
+  updated=$(printf '%s' "${raw#*$'\n'}" | base64 -d | jq "${args[@]}" "$filter")
+  gh_put_file "$path" "$updated" "update wp: ${project}/${wp}" "$sha"
   echo "Updated work package: ${project}/${wp}"
 }
 
@@ -346,6 +386,13 @@ cmd_show() {
     wp_status=$(echo "$wp" | jq -r '.status')
     wp_priority=$(echo "$wp" | jq -r '.priority // ""')
     printf "\n  [%s] %s (%s)\n" "$wp_status" "$wp_name" "$wp_priority"
+    local wp_blocker wp_notes
+    wp_blocker=$(echo "$wp" | jq -r '.blocked_by // ""')
+    # On one line: a line of a multi-line note could otherwise read as a task
+    # ("[x] ...") to anything that parses this output, like the pi extension.
+    wp_notes=$(echo "$wp" | jq -r '.notes // "" | gsub("\\s*\\n\\s*"; " ")')
+    [ -n "$wp_blocker" ] && printf "    blocked by: %s\n" "$wp_blocker"
+    [ -n "$wp_notes" ] && printf "    note: %s\n" "$wp_notes"
     local tasks
     tasks=$(gh_list_dir "projects/${slug}/${item}/tasks")
     [ -z "$tasks" ] && continue

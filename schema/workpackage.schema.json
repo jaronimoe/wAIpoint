@@ -16,7 +16,11 @@
     },
     "blocked_by": {
       "type": "string",
-      "description": "Slug of blocking work package, if any"
+      "description": "Slug of the work package in the same project that blocks this one; only set while status is blocked"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Brief context — why it is blocked, dependencies, decisions"
     },
     "created": { "type": "string", "format": "date-time" },
     "updated": {

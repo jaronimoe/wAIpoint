@@ -325,10 +325,16 @@ async function handleUpdate(request, env, ctx) {
     const doc = current.doc;
     // No commit for a no-op: it would still stamp `edited` and move the marker.
     if (doc[field] === value) return { unchanged: true, doc };
-    const from = doc[field] ?? "(unset)";
+    const changes = [`${field}: ${doc[field] ?? "(unset)"} -> ${value}`];
     doc[field] = value;
+    // A blocker only means something while the work package is blocked; the
+    // CLI drops it the same way.
+    if (kind === "wp" && field === "status" && value !== "blocked" && doc.blocked_by !== undefined) {
+      changes.push(`blocked_by: ${doc.blocked_by} -> (unset)`);
+      delete doc.blocked_by;
+    }
     doc.edited = nowIso();
-    const message = `update ${kind}: ${recordLabel(body)}\n\n${field}: ${from} -> ${value}\nvia dashboard by ${email}`;
+    const message = `update ${kind}: ${recordLabel(body)}\n\n${changes.join("\n")}\nvia dashboard by ${email}`;
     return { doc, message };
   });
   if (result.error) return json({ error: result.error }, result.status);

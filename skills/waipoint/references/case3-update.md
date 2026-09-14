@@ -51,6 +51,13 @@ waipoint update-wp <slug> <wp> --status done
 # Work has started
 waipoint update-wp <slug> <wp> --status in-progress
 
-# Blocked on something
-waipoint update-wp <slug> <wp> --status blocked
+# Blocked on another work package in the project (sets status to blocked)
+waipoint update-wp <slug> <wp> --blocked-by <other-wp> \
+  --notes "Needs the session endpoint from <other-wp>"
+
+# Blocked on something outside the project
+waipoint update-wp <slug> <wp> --status blocked \
+  --notes "Waiting on an upstream fix in <library>"
 ```
+
+When you mark a work package blocked, always say why in `--notes`. Moving it to any other status clears `blocked_by`; update the notes too (`--notes ""` clears them) if they no longer apply.

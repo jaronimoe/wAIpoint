@@ -4,6 +4,7 @@
   "status": "blocked",
   "priority": "medium",
   "blocked_by": "offline-mode",
+  "notes": "Imported recipes have to be saved for offline use, which needs the sync queue first.",
   "created": "2026-07-20T10:00:00Z",
   "updated": "2026-07-20T10:00:00Z",
   "edited": "2026-09-08T09:41:00Z"
