@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
+<title>Demo data · wAIpoint</title>
+<style>
+  :root {
+    --surface: #F5F4F0;
+    --surface-raised: #FFFFFF;
+    --border: #E0DED8;
+    --text-1: #2A2A2A;
+    --text-2: #6B6965;
+    --accent: #2A7C7A;
+    --accent-dim: #E5F0EF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: #1A1C20;
+      --surface-raised: #24262B;
+      --border: #35373D;
+      --text-1: #DDDCD9;
+      --text-2: #9A9893;
+      --accent: #4AADA9;
+      --accent-dim: #1C3332;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface: #1A1C20;
+    --surface-raised: #24262B;
+    --border: #35373D;
+    --text-1: #DDDCD9;
+    --text-2: #9A9893;
+    --accent: #4AADA9;
+    --accent-dim: #1C3332;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 2rem 1rem;
+    background: var(--surface);
+    color: var(--text-1);
+    font-family: system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+  }
+  main {
+    max-width: 32rem;
+    padding: 2rem;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .eyebrow { margin: 0; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); }
+  h1 { margin: 0.25rem 0 1rem; font-size: 1.4rem; font-weight: 600; }
+  code {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.9em;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    overflow-wrap: anywhere;
+  }
+  p { margin: 0 0 1rem; color: var(--text-2); }
+  nav { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; margin-top: 1.5rem; }
+  a { color: var(--accent); font-weight: 500; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">wAIpoint demo</p>
+  <h1 id="what">This link goes nowhere</h1>
+  <p>Everything on this board is made-up example data, so its repos and commits don't exist.</p>
+  <p>On your own board, a repo name opens that repo on GitHub, and a commit hash opens the commit an agent recorded when it finished the task.</p>
+  <nav>
+    <a href="./">← Back to the board</a>
+    <a href="https://github.com/jaronimoe/wAIpoint#quick-start">Track your own projects →</a>
+  </nav>
+</main>
+<script>
+  // The demo build links here as #repo/<owner>/<name> or #commit/<sha>.
+  const h1 = document.getElementById('what');
+  const fallback = h1.textContent;
+  function showTarget() {
+    const [kind, ...rest] = decodeURIComponent(location.hash.slice(1)).split('/');
+    const name = rest.join('/');
+    if (!name || (kind !== 'repo' && kind !== 'commit')) return h1.replaceChildren(fallback);
+    const code = document.createElement('code');
+    code.textContent = name;
+    h1.replaceChildren(kind === 'repo' ? 'Repo ' : 'Commit ', code, ' is demo data');
+  }
+  showTarget();
+  addEventListener('hashchange', showTarget);
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+name: Demo board
+
+# Publishes examples/projects as a read-only board on GitHub Pages. The daily
+# run re-dates the demo so it never looks abandoned (see examples/build-demo.py).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - examples/**
+      - docs/index.html
+      - scripts/build-dashboard.py
+      - .github/workflows/pages-demo.yml
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-demo
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 examples/build-demo.py _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
