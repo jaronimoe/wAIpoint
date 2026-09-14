@@ -516,11 +516,26 @@ function exitFocus() {
 
 const isArchived = p => p.status === 'archived';
 
-// Active, then paused, then completed. The build lists projects by slug and
-// sort is stable, so each group stays in slug order.
+// The newest date anywhere in a project: an agent's write to the project, a
+// work package or a task, or a dashboard edit to any of them.
+function lastTouched(project) {
+  let last = Math.max(stamp(project), editStamp(project));
+  for (const wp of project.workpackages || []) {
+    last = Math.max(last, stamp(wp), editStamp(wp));
+    for (const t of wp.tasks || []) last = Math.max(last, stamp(t), editStamp(t));
+  }
+  return last;
+}
+
+// Active, then paused, then completed; within a group, the most recently
+// touched first. The build lists projects by slug and sort is stable, so ties
+// and projects without any date stay in slug order.
 const projectStatusOrder = { active: 0, paused: 1, completed: 2 };
-const sortProjects = projects => projects.slice().sort((a, b) =>
-  (projectStatusOrder[a.status] ?? 0) - (projectStatusOrder[b.status] ?? 0));
+const sortProjects = projects => projects
+  .map(p => ({ p, when: lastTouched(p) }))
+  .sort((a, b) => (projectStatusOrder[a.p.status] ?? 0) - (projectStatusOrder[b.p.status] ?? 0)
+    || b.when - a.when)
+  .map(({ p }) => p);
 
 const prioOrder = { high: 0, medium: 1, low: 2 };
 const wpStatusOrder = { 'in-progress': 0, 'blocked': 1, 'planned': 2, 'done': 3 };
@@ -901,7 +916,7 @@ function render() {
     return;
   }
 
-  const shown = archive ? archived : sortProjects(projects.filter(p => !isArchived(p)));
+  const shown = sortProjects(archive ? archived : projects.filter(p => !isArchived(p)));
   const t = tally(shown);
   stats.innerHTML = stat(shown.length, `${archive ? 'archived ' : ''}${plural(shown.length, 'project')}`)
     + stat(t.wps, plural(t.wps, 'work package'))

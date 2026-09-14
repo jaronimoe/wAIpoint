@@ -340,9 +340,11 @@ Clicking a row in any panel opens its work package and scrolls to it.
 
 ### Archived projects
 
-The board lists active projects first, then paused, then completed, each group
-in slug order. Archived projects are left off it and out of its counts. When
-there are any, **Archived (N)** opens them as a board of their own
+The board lists active projects first, then paused, then completed. Within each
+group the most recently touched project comes first: the newest agent update or
+manual edit anywhere in it, whether to the project, a work package or a task.
+Archived projects are left off the board and out of its counts. When there are
+any, **Archived (N)** opens them, in the same order, as a board of their own
 (`…/#:archived`), and **← All projects** returns. A project opened from there
 leads back to the archive. Archiving a project from the dashboard moves it
 there as soon as the edit saves.
