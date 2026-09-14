@@ -4,6 +4,16 @@ A lightweight project tracker for LLM coding agents. Your roadmap lives as JSON
 files in a private GitHub repo, and agents post updates to it with a small CLI —
 no server, no database, and no copy of the tracker inside every project.
 
+<a href="https://jaronimoe.github.io/wAIpoint/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/readme/dashboard-dark.png">
+    <img src=".github/readme/dashboard-light.png" width="760" alt="The wAIpoint dashboard: two example projects side by side, each with its work packages, progress bars, tasks, notes and commit links">
+  </picture>
+</a>
+
+**[Open the live demo board](https://jaronimoe.github.io/wAIpoint/)**, built from
+the invented projects in `examples/`.
+
 ## How it works
 
 Two repos are involved:
@@ -29,8 +39,9 @@ data repo through the GitHub API. Nothing gets cloned: `waipoint update-task`
 reads one small JSON file, changes a field, and writes it back as a commit. So
 every change is in the history, with a clear message, for free.
 
-To see a board before setting anything up, build one from the demo data in
-`examples/` and open `dist/demo.html` in a browser:
+To see a board before setting anything up, open the
+[demo board](https://jaronimoe.github.io/wAIpoint/). To build the same board
+yourself, run this and open `dist/demo.html` in a browser:
 
 ```bash
 mkdir -p dist
