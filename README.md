@@ -474,7 +474,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: jaronimoe/wAIpoint@v0.3.2
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -507,6 +507,25 @@ token took.
 The tag in `uses: jaronimoe/wAIpoint@v0.3.2` is the version your dashboard runs.
 A new wAIpoint release changes nothing on your Worker until you bump that tag —
 a one-line commit in your data repo, and just as easy to revert.
+
+To hear about releases instead of checking for them, let Dependabot watch the
+tag. Add `.github/dependabot.yml` to your data repo:
+
+```yaml
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+```
+
+When wAIpoint tags a release, Dependabot opens a pull request that bumps the
+`uses:` line. Merging it changes `dashboard.yml`, which the workflow's `paths`
+filter includes, so the merge itself deploys the new version. The pull request
+alone deploys nothing, since the workflow runs only on pushes to `main`.
+Dependabot proposes updates to the workflow's other actions, such as
+`actions/checkout`, the same way.
 
 ### Troubleshooting
 
