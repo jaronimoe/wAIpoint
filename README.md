@@ -475,7 +475,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: jaronimoe/wAIpoint@v0.3.1
+      - uses: jaronimoe/wAIpoint@v0.3.2
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -504,7 +504,7 @@ token took.
 
 ### Updating
 
-The tag in `uses: jaronimoe/wAIpoint@v0.3.1` is the version your dashboard runs.
+The tag in `uses: jaronimoe/wAIpoint@v0.3.2` is the version your dashboard runs.
 A new wAIpoint release changes nothing on your Worker until you bump that tag —
 a one-line commit in your data repo, and just as easy to revert.
 
