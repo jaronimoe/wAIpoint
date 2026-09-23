@@ -318,8 +318,13 @@ width. The URL gains the project slug (`…/#my-app`), so a focused project is
 linkable and bookmarkable. Back returns to the board, and so do Esc and
 **← All projects**. The collapse and open-only controls keep working inside it.
 
-The extra width buys four things a 340px column has no room for:
+The extra width buys five things a 340px column has no room for:
 
+- **Lanes by status** — the work packages laid out as a kanban board, one lane
+  each for planned, in progress, blocked and done. Within a lane the most
+  recently touched work package comes first: the newest agent update or manual
+  edit to it or any of its tasks, shown on the card as an age (`3h ago`).
+  Narrower windows fold the four lanes into two rows, and a phone stacks them.
 - **An overview strip** — every task as one bar (done / in progress / open /
   dropped), the work-package states beside it, and the project's start, last
   agent update and last manual edit. Task `updated` stamps drive the agent
@@ -329,9 +334,9 @@ The extra width buys four things a 340px column has no room for:
   `blocked_by` is set, with their notes), tasks marked `current`, and
   high-priority work packages that still have open tasks. Nothing to flag
   means no panel.
-- **Recent updates** — every task by `updated`, plus every manual edit (marked
-  with the pencil) to a task, a work package or the project by `edited`, newest
-  first, grouped by day. It shows when a record was last written and where it
+- **Recent updates** — below the lanes, every task by `updated`, plus every
+  manual edit (marked with the pencil) to a task, a work package or the project
+  by `edited`, newest first, grouped by day. It shows when a record was last written and where it
   stands now, which is not the same as when it changed status.
 - **Commits** — every commit URL the project has collected, grouped under its
   task. Ordered by the task's last write, since commit dates are not stored.

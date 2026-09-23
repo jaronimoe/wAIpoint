@@ -229,7 +229,7 @@
   .focus::-webkit-scrollbar { width: 8px; }
   .focus::-webkit-scrollbar-track { background: transparent; }
   .focus::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-  .focus-head, .focus-grid { max-width: 1400px; margin-left: auto; margin-right: auto; }
+  .focus-head, .focus-body { max-width: 1400px; margin-left: auto; margin-right: auto; }
   .focus-head { margin-bottom: 1.25rem; }
   .focus-head .project-name { font-size: 1.45rem; }
   .focus-head .project-desc { font-size: 0.92rem; max-width: 68ch; }
@@ -253,14 +253,20 @@
   .legend-label { font-size: 0.68rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
   .focus-dates { margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--text-3); }
 
-  .focus-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1.1rem; align-items: start; }
-  /* Lanes rather than grid rows, which grow to their tallest card and leave
-     the cards beside it trailing empty space. packWps() deals cards into them. */
-  .focus-wps { display: flex; gap: 0.6rem; align-items: flex-start; }
-  .wp-lane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: inherit; }
-  .focus-wps .wp { margin-bottom: 0; }
-  .focus-rail { display: flex; flex-direction: column; gap: 0.6rem; }
-  @media (max-width: 900px) { .focus-grid { grid-template-columns: minmax(0, 1fr); } }
+  /* A kanban board: one lane per work package status, each its own stack, so a
+     card opening or closing moves only the cards below it. The panels that
+     used to sit in a rail go underneath, leaving the lanes the full width. */
+  .kanban { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; align-items: start; }
+  .kanban-lane { min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; background: var(--column-bg); border-radius: 6px; padding: 0.5rem; }
+  .kanban-head { display: flex; align-items: baseline; gap: 0.4rem; padding: 0.1rem 0.15rem; }
+  .kanban-count { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .kanban-empty { font-size: 0.75rem; font-style: italic; color: var(--text-3); text-align: center; padding: 0.75rem 0; border: 1px dashed var(--border); border-radius: 5px; }
+  .kanban .wp { margin-bottom: 0; }
+  .wp-when { font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; color: var(--text-3); white-space: nowrap; }
+  .focus-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; align-items: start; margin-top: 1.1rem; }
+  @media (max-width: 1100px) { .kanban { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 900px) { .focus-panels { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 640px) { .kanban { grid-template-columns: minmax(0, 1fr); } }
 
   .panel { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 5px; padding: 0.75rem 0.85rem; }
   .panel-attention { margin-bottom: 0.6rem; }
@@ -516,14 +522,19 @@ function exitFocus() {
 
 const isArchived = p => p.status === 'archived';
 
-// The newest date anywhere in a project: an agent's write to the project, a
-// work package or a task, or a dashboard edit to any of them.
+// The newest date in a work package: an agent's write to it or one of its
+// tasks, or a dashboard edit to any of them. A task write leaves the work
+// package's own stamp alone, so the tasks have to be read too.
+function wpTouched(wp) {
+  let last = Math.max(stamp(wp), editStamp(wp));
+  for (const t of wp.tasks || []) last = Math.max(last, stamp(t), editStamp(t));
+  return last;
+}
+
+// The newest date anywhere in a project, the project record included.
 function lastTouched(project) {
   let last = Math.max(stamp(project), editStamp(project));
-  for (const wp of project.workpackages || []) {
-    last = Math.max(last, stamp(wp), editStamp(wp));
-    for (const t of wp.tasks || []) last = Math.max(last, stamp(t), editStamp(t));
-  }
+  for (const wp of project.workpackages || []) last = Math.max(last, wpTouched(wp));
   return last;
 }
 
@@ -599,7 +610,9 @@ function tally(projects) {
   return { wps, tasks, done, commits, last, first };
 }
 
-function wpCard(p, wp, latest, edit) {
+// `when` is the work package's last-touched date, shown only in the focus
+// view, where it is what orders the cards in a lane.
+function wpCard(p, wp, latest, edit, when = 0) {
   const tasks = wp.tasks || [];
   const done = tasks.filter(t => t.status === 'done').length;
   const openTasks = tasks.filter(t => !CLOSED[t.status]).length;
@@ -637,7 +650,7 @@ function wpCard(p, wp, latest, edit) {
       <span class="chev"></span>
       <div class="wp-summary-main">
         <div class="wp-header"><h3 class="wp-name">${esc(wp.name)}</h3>${status}${priority}${hasLatest ? sparkMark : ''}${editMark}${WRITE ? `<button class="add-btn" data-add="task" data-project="${p.slug}" data-wp="${wp.slug}" title="Add task">+</button>` : ''}</div>
-        <div class="progress-row"><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div><span class="progress-label">${done}/${tasks.length}</span></div>
+        <div class="progress-row"><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div><span class="progress-label">${done}/${tasks.length}</span>${when ? `<span class="wp-when" title="${escAttr(`Last update: ${fullTime(when)}`)}">${timeAgo(when)}</span>` : ''}</div>
       </div>
     </summary>
     <div class="wp-body">
@@ -820,7 +833,6 @@ function focusView(p) {
   const edit = latestEdit(p);
   const t = tally([p]);
   const wps = sortWps(p.workpackages || []);
-  const cards = wps.map(wp => wpCard(p, wp, latest, edit)).join('');
   return `<div class="focus-head">
     <button class="back-btn" type="button" data-exit="1">&larr; ${isArchived(p) ? 'Archived projects' : 'All projects'}</button>
     <div class="project-header"><h2 class="project-name">${esc(p.name)}</h2>${projectBadge(p)}${WRITE ? `<button class="add-btn" data-add="wp" data-project="${p.slug}" title="Add work package">+</button>` : ''}</div>
@@ -828,51 +840,32 @@ function focusView(p) {
     <div class="project-meta">${repoLinks(p)} ${tagChips(p)}</div>
     ${overview(p, t, edit)}
   </div>
-  <div class="focus-grid">
-    <div class="focus-main">
-      ${attentionPanel(p, wps)}
-      ${cards ? `<div class="focus-wps">${cards}</div>` : '<div class="empty">No work packages yet.</div>'}
-    </div>
-    <aside class="focus-rail">${timelinePanel(p)}${commitPanel(p)}</aside>
+  <div class="focus-body">
+    ${attentionPanel(p, wps)}
+    ${wps.length ? kanban(p, wps, latest, edit) : '<div class="empty">No work packages yet.</div>'}
+    <div class="focus-panels">${timelinePanel(p)}${commitPanel(p)}</div>
   </div>`;
 }
 
-/* Work packages are dealt into lanes: each card, in sort order, joins the
-   shortest one, so the top row still reads by status. A lane is its own stack,
-   so a card opening or closing moves only the cards below it. The deal is
-   redone only when the lane count changes or a control resizes every card. */
+/* One lane per status, in the order work moves through them. A lane shows
+   its most recently touched work package first; sort is stable, so ties and
+   work packages without any date keep their status-then-priority order. A
+   status outside these four would have no lane, so it joins Planned, as it
+   already sorts there. */
 
-const LANE_MIN = 300;  // px; the narrowest a lane gets before one is dropped
+const LANES = ['planned', 'in-progress', 'blocked', 'done'];
 
-// render() leaves the cards in sort order; a later deal finds them spread
-// across lanes, so it works from this list instead.
-let laneCards = [];
-
-function laneCount(grid) {
-  const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
-  return Math.max(1, Math.floor((grid.clientWidth + gap) / (LANE_MIN + gap)));
-}
-
-function packWps() {
-  const grid = document.querySelector('.focus-wps');
-  if (!grid) return;
-  if (!grid.querySelector('.wp-lane')) laneCards = [...grid.children];
-  const lanes = Array.from({ length: laneCount(grid) }, () => {
-    const lane = document.createElement('div');
-    lane.className = 'wp-lane';
-    return lane;
-  });
-  // All in the first lane, every card is measured at lane width in one layout.
-  lanes[0].append(...laneCards);
-  grid.replaceChildren(...lanes);
-  const heights = laneCards.map(card => card.offsetHeight);
-  const gap = parseFloat(getComputedStyle(grid).rowGap) || 0;
-  const filled = lanes.map(() => 0);
-  laneCards.forEach((card, i) => {
-    const k = filled.indexOf(Math.min(...filled));  // leftmost on a tie
-    lanes[k].append(card);
-    filled[k] += heights[i] + gap;
-  });
+function kanban(p, wps, latest, edit) {
+  const lanes = Object.fromEntries(LANES.map(s => [s, []]));
+  for (const wp of wps) (lanes[wp.status] || lanes.planned).push({ wp, when: wpTouched(wp) });
+  return `<div class="kanban">${LANES.map(status => {
+    const cards = lanes[status].sort((a, b) => b.when - a.when)
+      .map(({ wp, when }) => wpCard(p, wp, latest, edit, when)).join('');
+    return `<section class="kanban-lane" data-lane="${status}">
+      <div class="kanban-head"><span class="badge badge-${status}">${status.replace('-', ' ')}</span><span class="kanban-count">${lanes[status].length}</span></div>
+      ${cards || '<div class="kanban-empty">none</div>'}
+    </section>`;
+  }).join('')}</div>`;
 }
 
 /* ---- entry point ----------------------------------------------------- */
@@ -912,7 +905,6 @@ function render() {
       + (edit ? stat(timeAgo(edit.when), 'last manual edit') : '');
     main.className = 'focus';
     main.innerHTML = focusView(project);
-    packWps();
     return;
   }
 
@@ -1274,16 +1266,8 @@ collapseBtn.addEventListener('click', () => {
   const all = [...board.querySelectorAll('details.wp')];
   const open = !all.some(wp => wp.open);   // nothing left open -> expand instead
   all.forEach(wp => { wp.open = open; });  // each fires 'toggle', which persists it
-  packWps();
   syncCollapseBtn();
 });
-
-// Dragging a window edge re-deals only when the number of lanes that fit
-// changes, so cards hold still in between.
-new ResizeObserver(() => {
-  const grid = document.querySelector('.focus-wps');
-  if (grid && laneCount(grid) !== grid.childElementCount) packWps();
-}).observe(board);
 
 openOnlyBox.checked = readStore(STORE_OPEN_ONLY, false) === true;
 applyOpenOnly();
@@ -1293,18 +1277,13 @@ openOnlyBox.addEventListener('change', () => {
 });
 
 // Filtering is a class on <body> rather than a re-render: the markup marks
-// every closed task, so the view flips without disturbing anything else --
-// bar the focus view's lanes, which were dealt by the old card heights.
+// every closed task, so the view flips without disturbing anything else.
 function applyOpenOnly() {
   document.body.classList.toggle('open-only', openOnlyBox.checked);
-  packWps();
 }
 
 render();
 syncCollapseBtn();
-// The first deal measured the cards in fallback fonts if the embedded ones were
-// still decoding, and text wraps differently once they arrive.
-document.fonts.ready.then(() => packWps());
 detectWriteApi().then(ok => { if (ok) { WRITE = true; render(); syncCollapseBtn(); } });
 </script>
 </body>
